@@ -3,6 +3,7 @@ mod app;
 mod http;
 mod library;
 mod messages;
+mod photo_cache;
 mod photo_match;
 mod telegram;
 

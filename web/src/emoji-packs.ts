@@ -15,7 +15,7 @@ export function createEmojiPacks(api: AccountApi) {
     async function select(id = activeId()) {
         setActiveId(id);
         const cached = catalog.packs[id];
-        if (cached?.choices || cached?.loading) return;
+        if (cached?.loading || (id && cached?.choices)) return;
         setCatalog((draft) => {
             draft.packs[id] = { loading: true, error: "" };
         });
@@ -49,6 +49,21 @@ export function createEmojiPacks(api: AccountApi) {
         },
         get active() {
             return catalog.packs[activeId()];
+        },
+        get groups() {
+            const choices = catalog.packs[activeId()]?.choices;
+            if (!choices) return [];
+            if (activeId()) return [{ kind: "pack" as const, choices }];
+            return [
+                {
+                    kind: "recent" as const,
+                    choices: choices.filter((emoji) => emoji.source_kind === "recent"),
+                },
+                {
+                    kind: "default" as const,
+                    choices: choices.filter((emoji) => emoji.source_kind !== "recent"),
+                },
+            ];
         },
         get title() {
             return catalog.sets.find((set) => set.id === activeId())?.title ?? t("recentDefault");

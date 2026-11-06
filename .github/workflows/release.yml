@@ -47,7 +47,17 @@ jobs:
         working-directory: web
         run: bun install --frozen-lockfile
       - name: Build binary
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        shell: bash
+        env:
+          CELINE_API_ID: ${{ secrets.CELINE_API_ID }}
+          CELINE_API_HASH: ${{ secrets.CELINE_API_HASH }}
+        run: |
+          if [[ ! "$CELINE_API_ID" =~ ^[0-9]{1,10}$ || ! "$CELINE_API_HASH" =~ ^[[:xdigit:]]{32}$ ]] ||
+             (( 10#$CELINE_API_ID == 0 || 10#$CELINE_API_ID > 2147483647 )); then
+            echo "Configure valid CELINE_API_ID and CELINE_API_HASH repository secrets before releasing." >&2
+            exit 1
+          fi
+          cargo build --release --locked --target ${{ matrix.target }}
       - name: Name binary
         shell: bash
         run: |

@@ -3,7 +3,7 @@ import { accountApi, request, timeRemaining } from "./api";
 import type { AccountApi, AccountSummary, State } from "./api";
 import { ProfileHeader } from "./ProfileHeader";
 import { serverMessage, t } from "./i18n";
-import { Button, Input, Label } from "./components/ui";
+import { Button, Card, TextField, TextFieldInput, TextFieldLabel } from "./components/ui";
 
 export type Actions = {
     busy: boolean;
@@ -197,101 +197,113 @@ export function Login(props: Actions & { api: AccountApi; auth: State["auth"]; n
     );
 
     return (
-        <section
-            aria-labelledby="login-title"
-            class="mx-auto my-8! w-full max-w-md rounded-xl bg-surface p-5 text-foreground sm:p-6"
-        >
-            <h2 id="login-title" class="m-0 text-xl! font-semibold tracking-tight text-balance">
-                {t("loginTitle")}
-            </h2>
-            <Show when={props.auth.message}>
-                {(message) => (
-                    <p class="mt-3 mb-0 text-sm text-muted-foreground text-pretty">
-                        {serverMessage(props.auth.message_info, message())}
-                    </p>
-                )}
-            </Show>
-            <Show
-                when={
-                    (((props.auth.status === "disconnected" &&
-                        props.auth.message_info?.code !== "auth.verifying") ||
-                        props.auth.status === "qr_expired") &&
-                        loading()) ||
-                    (props.auth.status === "qr" && (!props.auth.qr_svg || expired()))
+        <section aria-labelledby="login-title" class="mx-auto my-8! w-full max-w-md">
+            <Card
+                class={
+                    props.auth.status === "password"
+                        ? "gap-0 p-5 sm:p-6"
+                        : "gap-0 rounded-none bg-transparent p-5 sm:p-6"
                 }
             >
-                <div class="mt-6 flex flex-col items-center gap-3">
-                    <span
-                        class="block aspect-square w-64 max-w-full rounded-lg bg-muted motion-safe:animate-pulse"
-                        aria-hidden="true"
-                    />
-                    <p role="status" class="m-0 text-center text-sm text-muted-foreground">
-                        {t("loginQrRefreshing")}
-                    </p>
-                </div>
-            </Show>
-            <Show when={props.auth.status === "qr_expired" && !loading()}>
-                <p role="status" class="mt-4 mb-0 rounded-lg bg-muted p-3 text-sm text-pretty">
-                    {t("loginQrStopped")}
-                </p>
-            </Show>
-            <Show when={props.auth.status === "qr"}>
-                <p class="mt-3 mb-0 text-sm leading-relaxed text-muted-foreground text-pretty">
-                    {t("loginQrInstructions")}
-                </p>
-                <Show when={props.auth.qr_svg && !expired()}>
+                <h2 id="login-title" class="m-0 text-xl! font-semibold tracking-tight text-balance">
+                    {t("loginTitle")}
+                </h2>
+                <Show when={props.auth.message}>
+                    {(message) => (
+                        <p class="mt-3 mb-0 text-sm text-muted-foreground text-pretty">
+                            {serverMessage(props.auth.message_info, message())}
+                        </p>
+                    )}
+                </Show>
+                <Show
+                    when={
+                        (((props.auth.status === "disconnected" &&
+                            props.auth.message_info?.code !== "auth.verifying") ||
+                            props.auth.status === "qr_expired") &&
+                            loading()) ||
+                        (props.auth.status === "qr" && (!props.auth.qr_svg || expired()))
+                    }
+                >
                     <div class="mt-6 flex flex-col items-center gap-3">
-                        <div class="max-w-full rounded-lg bg-white p-3">
-                            <img
-                                class="block w-64 max-w-full"
-                                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(props.auth.qr_svg!)}`}
-                                alt={t("loginQrAlt")}
-                            />
-                        </div>
-                        <p
-                            role="status"
-                            class="m-0 text-center text-sm text-muted-foreground tabular-nums"
-                        >
-                            {props.auth.expires_at
-                                ? t("loginQrExpires", {
-                                      time: timeRemaining(props.auth.expires_at, props.now),
-                                  })
-                                : t("loginWaiting")}
+                        <span
+                            class="block aspect-square w-64 max-w-full rounded-lg bg-muted motion-safe:animate-pulse"
+                            aria-hidden="true"
+                        />
+                        <p role="status" class="m-0 text-center text-sm text-muted-foreground">
+                            {t("loginQrRefreshing")}
                         </p>
                     </div>
                 </Show>
-            </Show>
-            <Show when={props.auth.status === "password"}>
-                <form
-                    class="mt-6! mb-0! grid gap-4!"
-                    onSubmit={(event) => {
-                        event.preventDefault();
-                        // oxlint-disable-next-line solid/reactivity -- perform invokes this callback when the action runs; it is not a reactive computation.
-                        void props.perform(async () => {
-                            await props.api.request("auth/password", "POST", {
-                                password: password(),
+                <Show when={props.auth.status === "qr_expired" && !loading()}>
+                    <p role="status" class="mt-4 mb-0 rounded-lg bg-muted p-3 text-sm text-pretty">
+                        {t("loginQrStopped")}
+                    </p>
+                </Show>
+                <Show when={props.auth.status === "qr"}>
+                    <p class="mt-3 mb-0 text-sm leading-relaxed text-muted-foreground text-pretty">
+                        {t("loginQrInstructions")}
+                    </p>
+                    <Show when={props.auth.qr_svg && !expired()}>
+                        <div class="mt-6 flex flex-col items-center gap-3">
+                            {/* Tint the quiet zone without changing the black QR modules. */}
+                            <div
+                                class="isolate w-64 max-w-full"
+                                style={{
+                                    background: "color-mix(in srgb, var(--ui-accent) 40%, white)",
+                                }}
+                            >
+                                <img
+                                    class="block w-full mix-blend-multiply"
+                                    src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(props.auth.qr_svg!)}`}
+                                    alt={t("loginQrAlt")}
+                                />
+                            </div>
+                            <p
+                                role="status"
+                                class="m-0 text-center text-sm text-muted-foreground tabular-nums"
+                            >
+                                {props.auth.expires_at
+                                    ? t("loginQrExpires", {
+                                          time: timeRemaining(props.auth.expires_at, props.now),
+                                      })
+                                    : t("loginWaiting")}
+                            </p>
+                        </div>
+                    </Show>
+                </Show>
+                <Show when={props.auth.status === "password"}>
+                    <form
+                        class="mt-6! mb-0! grid gap-4!"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            // oxlint-disable-next-line solid/reactivity -- perform invokes this callback when the action runs; it is not a reactive computation.
+                            void props.perform(async () => {
+                                await props.api.request("auth/password", "POST", {
+                                    password: password(),
+                                });
+                                setPassword("");
                             });
-                            setPassword("");
-                        });
-                    }}
-                >
-                    <div class="grid gap-2">
-                        <Label for="password">{t("loginPassword")}</Label>
-                        <Input
-                            id="password"
-                            type="password"
-                            autocomplete="current-password"
-                            required
-                            disabled={props.busy}
+                        }}
+                    >
+                        <TextField
                             value={password()}
-                            onInput={(event) => setPassword(event.currentTarget.value)}
-                        />
-                    </div>
-                    <Button disabled={props.busy} type="submit">
-                        {t("loginContinue")}
-                    </Button>
-                </form>
-            </Show>
+                            onChange={setPassword}
+                            disabled={props.busy}
+                            required
+                        >
+                            <TextFieldLabel>{t("loginPassword")}</TextFieldLabel>
+                            <TextFieldInput
+                                id="password"
+                                type="password"
+                                autocomplete="current-password"
+                            />
+                        </TextField>
+                        <Button disabled={props.busy} type="submit">
+                            {t("loginContinue")}
+                        </Button>
+                    </form>
+                </Show>
+            </Card>
         </section>
     );
 }

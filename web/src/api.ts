@@ -13,6 +13,7 @@ export type Photo = {
     name: string;
     generated_name?: boolean | null;
     telegram_id: string | null;
+    history_checked: boolean;
     crop: Crop | null;
 };
 export type State = {
@@ -28,6 +29,7 @@ export type State = {
         message_info?: MessageInfo | null;
     };
     photos: Photo[];
+    photo_cache: { status: "refreshing" | "ready" | "error"; photos: { id: string }[] };
     settings: Settings;
     emoji_settings: Settings;
     applied_settings: Settings | null;

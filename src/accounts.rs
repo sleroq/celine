@@ -290,7 +290,7 @@ mod tests {
             .repository
             .lock()
             .await
-            .add_upload("First", b"jpeg", b"jpeg", None)
+            .add_upload("First", b"jpeg", b"jpeg", None, true)
             .unwrap();
         first_app
             .record_telegram_error(&TelegramError {
@@ -392,7 +392,7 @@ mod tests {
         app.repository
             .lock()
             .await
-            .add_upload("Saved", b"jpeg", b"jpeg", None)
+            .add_upload("Saved", b"jpeg", b"jpeg", None, true)
             .unwrap();
         accounts.remove(&old).await.unwrap();
         let state = accounts.state().await;
@@ -416,7 +416,7 @@ mod tests {
             .repository
             .lock()
             .await
-            .add_upload("Legacy", b"jpeg", b"jpeg", None)
+            .add_upload("Legacy", b"jpeg", b"jpeg", None, true)
             .unwrap();
         drop(legacy);
         fs::create_dir(dir.path().join("grammers")).unwrap();

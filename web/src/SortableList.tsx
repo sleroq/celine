@@ -6,11 +6,20 @@ import { EmojiMedia } from "./EmojiMedia";
 import { t } from "./i18n";
 import { resetTilt, tilt } from "./tilt";
 
+const photoStatusIcons = {
+    photoUploadNew: "M8 10V3m0 0L5 6m3-3 3 3M3 10v3h10v-3",
+    photoReusable: "M13 5V2m0 3h-3M3 11v3m0-3h3M3 6a5 5 0 0 1 9-2l1 1M3 11l1 1a5 5 0 0 0 9-2",
+    photoUnavailable: "M5 5l6 6m0-6-6 6M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13",
+    photoChecking: "M8 4v4l3 2M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13",
+    photoUnknown:
+        "M6 6a2 2 0 1 1 3 1.7c-1 .5-1 1-1 1.8M8 12v.1M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13",
+};
+
 type Item = {
     id: string;
     label: string;
     imageUrl?: string;
-    badge?: string;
+    badge?: keyof typeof photoStatusIcons;
     mediaUrl?: string;
     textColor?: boolean;
     reorderLabel?: string;
@@ -99,7 +108,7 @@ export function SortableList(props: Props) {
     return (
         <>
             <Show when={props.items.length}>
-                <p id={hintId()} class="hint text-sm text-[GrayText]">
+                <p id={hintId()} class="hint text-sm text-muted-foreground">
                     {t("reorderHint")}
                 </p>
             </Show>
@@ -115,6 +124,10 @@ export function SortableList(props: Props) {
                 <For each={ids()}>
                     {(id, index) => {
                         const item = () => props.items.find((candidate) => candidate.id === id)!;
+                        const badgeText = () => {
+                            const badge = item().badge;
+                            return badge ? t(badge) : undefined;
+                        };
 
                         return (
                             <li class="sortable-item relative">
@@ -130,6 +143,7 @@ export function SortableList(props: Props) {
                                             ? t("reorderPhoto", { name: item().label })
                                             : t("reorderEmoji", { name: item().label }))
                                     }
+                                    title={badgeText()}
                                     aria-describedby={[
                                         hintId(),
                                         item().badge && `${props.kind}-badge-${id}`,
@@ -195,33 +209,40 @@ export function SortableList(props: Props) {
                                             </span>
                                         )}
                                     </Show>
-                                    <Show when={item().badge}>
-                                        <span
-                                            class="photo-badge rounded-md shadow-sm"
-                                            aria-hidden="true"
-                                        >
-                                            <svg viewBox="0 0 16 16">
-                                                <path d="M8 10V3m0 0L5 6m3-3 3 3M3 10v3h10v-3" />
-                                            </svg>
-                                        </span>
-                                    </Show>
                                 </button>
                                 <Show when={item().current}>
                                     <span
                                         id={`${props.kind}-current-${id}`}
-                                        class="photo-current font-medium"
+                                        class="pointer-events-none absolute inset-s-1 top-1 grid size-5 place-items-center rounded-md bg-accent text-accent-foreground shadow-sm"
                                     >
-                                        {t("currentPhoto")}
+                                        <svg
+                                            aria-hidden="true"
+                                            class="size-3.5 fill-none stroke-current stroke-2"
+                                            viewBox="0 0 16 16"
+                                        >
+                                            <path d="m3 8 3 3 7-7" />
+                                        </svg>
+                                        <span class="visually-hidden sr-only">
+                                            {t("currentPhoto")}
+                                        </span>
                                     </span>
                                 </Show>
                                 <Show when={item().badge}>
                                     {(badge) => (
                                         <span
                                             id={`${props.kind}-badge-${id}`}
-                                            class="tooltip photo-tooltip rounded-md shadow-md"
-                                            role="tooltip"
+                                            class="pointer-events-none absolute inset-e-1 bottom-1 grid size-5 place-items-center rounded-md border border-border bg-surface text-foreground shadow-sm"
                                         >
-                                            {badge()}
+                                            <svg
+                                                aria-hidden="true"
+                                                class="size-3.5 fill-none stroke-current stroke-2"
+                                                viewBox="0 0 16 16"
+                                            >
+                                                <path d={photoStatusIcons[badge()]} />
+                                            </svg>
+                                            <span class="visually-hidden sr-only">
+                                                {t(badge())}
+                                            </span>
                                         </span>
                                     )}
                                 </Show>

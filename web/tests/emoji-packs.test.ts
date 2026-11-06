@@ -3,7 +3,20 @@ import { flush } from "solid-js";
 import { accountApi } from "../src/api";
 import { createEmojiPacks } from "../src/emoji-packs";
 
-const recent = { id: "100", label: "⭐", source: "Recent", thumbnail_url: "/recent.png" };
+const recent = {
+    id: "100",
+    label: "⭐",
+    source: "Recent",
+    source_kind: "recent" as const,
+    thumbnail_url: "/recent.png",
+};
+const suggested = {
+    id: "150",
+    label: "🌟",
+    source: "Default",
+    source_kind: "default" as const,
+    thumbnail_url: "/suggested.png",
+};
 const leaf = { id: "200", label: "🌿", source: "Nature", thumbnail_url: "/leaf.png" };
 const fire = { id: "300", label: "🔥", source: "Reactions", thumbnail_url: "/fire.png" };
 const catalog = {
@@ -40,38 +53,83 @@ describe("emoji pack browsing", () => {
         expect(work.sets).toEqual([]);
         expect(work.find(recent.id)).toBeUndefined();
         expect(personal.find(recent.id)).toEqual(recent);
-        await personal.select();
         expect(fetch.mock.calls.map(([url]) => url)).toEqual([
             "/api/accounts/personal/emojis",
             "/api/accounts/work/emojis",
         ]);
     });
 
-    test("loads recent/default and pack titles once", async () => {
-        const fetch = spyOn(globalThis, "fetch").mockResolvedValue(Response.json(catalog));
+    test("refreshes Telegram status recents and separates suggestions", async () => {
+        const newer = { ...recent, id: "101", label: "✨" };
+        const fetch = spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(Response.json({ ...catalog, choices: [recent, suggested] }))
+            .mockResolvedValueOnce(
+                Response.json({ ...catalog, choices: [newer, recent, suggested] }),
+            )
+            .mockResolvedValueOnce(Response.json({ ...catalog, choices: [suggested] }));
         const packs = createEmojiPacks(accountApi("account-a"));
         expect(packs.active).toBeUndefined();
         await packs.select();
         expect(packs.activeId).toBe("");
-        expect(packs.title).toBe("Recent / default");
+        expect(packs.title).toBe("Recent / suggested");
         expect(packs.sets).toEqual(catalog.sets);
-        expect(packs.active).toEqual({ choices: [recent], loading: false, error: "" });
+        expect(packs.groups).toEqual([
+            { kind: "recent", choices: [recent] },
+            { kind: "default", choices: [suggested] },
+        ]);
+        await packs.select();
+        expect(packs.groups).toEqual([
+            { kind: "recent", choices: [newer, recent] },
+            { kind: "default", choices: [suggested] },
+        ]);
         await packs.select("");
-        expect(fetch).toHaveBeenCalledTimes(1);
-        expect(fetch.mock.calls[0][0]).toBe("/api/accounts/account-a/emojis");
+        expect(packs.groups).toEqual([
+            { kind: "recent", choices: [] },
+            { kind: "default", choices: [suggested] },
+        ]);
+        expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+            "/api/accounts/account-a/emojis",
+            "/api/accounts/account-a/emojis",
+            "/api/accounts/account-a/emojis",
+        ]);
+    });
+
+    test("deduplicates an in-flight refresh and retries a failed refresh", async () => {
+        let respond!: (response: Response) => void;
+        const slow = new Promise<Response>((resolve) => {
+            respond = resolve;
+        });
+        const fetch = spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(Response.json(catalog))
+            .mockReturnValueOnce(slow)
+            .mockResolvedValueOnce(Response.json(catalog));
+        const packs = createEmojiPacks(accountApi("account-a"));
+        await packs.select();
+        const refresh = packs.select("");
+        await packs.select("");
+        expect(fetch).toHaveBeenCalledTimes(2);
+        respond(Response.json({ error: "Telegram unavailable." }, { status: 503 }));
+        await refresh;
+        expect(packs.active).toEqual({ loading: false, error: "Telegram unavailable." });
+        expect(packs.groups).toEqual([]);
+        await packs.select("");
+        expect(packs.groups[0].choices).toEqual([recent]);
+        expect(fetch).toHaveBeenCalledTimes(3);
     });
 
     test("switches to only the active pack and retains choices from other packs", async () => {
         const fetch = spyOn(globalThis, "fetch")
             .mockResolvedValueOnce(Response.json(catalog))
             .mockResolvedValueOnce(Response.json({ choices: [leaf] }))
-            .mockResolvedValueOnce(Response.json({ choices: [fire] }));
+            .mockResolvedValueOnce(Response.json({ choices: [fire] }))
+            .mockResolvedValueOnce(Response.json(catalog));
         const packs = createEmojiPacks(accountApi("account-a"));
         await packs.select();
         await packs.select("2000");
         expect(packs.title).toBe("Nature");
         expect(packs.count).toBe(3);
         expect(packs.active?.choices).toEqual([leaf]);
+        expect(packs.groups).toEqual([{ kind: "pack", choices: [leaf] }]);
         const nature = packs.active?.choices;
         await packs.select("3000");
         expect(packs.title).toBe("Reactions");
@@ -90,6 +148,7 @@ describe("emoji pack browsing", () => {
             "/api/accounts/account-a/emojis",
             "/api/accounts/account-a/emojis/sets/2000",
             "/api/accounts/account-a/emojis/sets/3000",
+            "/api/accounts/account-a/emojis",
         ]);
     });
 
@@ -150,6 +209,7 @@ describe("emoji pack browsing", () => {
         const fetch = spyOn(globalThis, "fetch")
             .mockResolvedValueOnce(Response.json(catalog))
             .mockRejectedValueOnce(new Error("Pack unavailable."))
+            .mockResolvedValueOnce(Response.json(catalog))
             .mockResolvedValueOnce(Response.json({ choices: [leaf] }));
         const packs = createEmojiPacks(accountApi("account-a"));
         await packs.select();
@@ -160,7 +220,7 @@ describe("emoji pack browsing", () => {
         expect(packs.active).toEqual({ choices: [recent], loading: false, error: "" });
         await packs.select("2000");
         expect(packs.active).toEqual({ choices: [leaf], loading: false, error: "" });
-        expect(fetch).toHaveBeenCalledTimes(3);
+        expect(fetch).toHaveBeenCalledTimes(4);
     });
 
     test("preserves document-sized pack IDs", async () => {

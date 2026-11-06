@@ -1,4 +1,4 @@
-<img src="web/public/logo.jpg" alt="Celine logo" width="160">
+<img src="assets/logo.gif" alt="Celine logo" width="160">
 
 # Celine
 

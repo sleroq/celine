@@ -1,3 +1,14 @@
 export { Button } from "./button";
-export { Input, Label, Textarea } from "./input";
-export { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./card";
+export { Card } from "./card";
+export { Checkbox, CheckboxControl, CheckboxInput, CheckboxLabel } from "./checkbox";
+export {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectLabel,
+    SelectPortal,
+    SelectTrigger,
+    SelectValue,
+} from "./select";
+export { Tabs, TabsContent, TabsIndicator, TabsList, TabsTrigger } from "./tabs";
+export { TextField, TextFieldInput, TextFieldLabel } from "./text-field";

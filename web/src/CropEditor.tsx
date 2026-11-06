@@ -52,6 +52,7 @@ export function CropEditor(props: {
             autoCropArea: 1,
             responsive: true,
             background: false,
+            modal: false,
             ready() {
                 const data = cropper!.getCanvasData();
                 const imageDimensions = { width: data.naturalWidth, height: data.naturalHeight };

@@ -36,6 +36,7 @@ pub fn router(app: Arc<App>) -> Router {
             "/api/photos/history",
             get(photo_history).post(select_history_photo),
         )
+        .route("/api/photos/history/refresh", post(refresh_photo_history))
         .route("/api/photos/history/{id}", get(history_photo))
         .route("/api/photos/order", post(reorder))
         .route("/api/photos/{id}", get(photo).delete(remove))
@@ -364,23 +365,7 @@ async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> Respon
         Ok(None) => {}
         _ => return bad(Message::new("upload.one_image", "Upload one image per request.").into()),
     }
-    let mut connection = match app.connection().await {
-        Ok(connection) => connection,
-        Err(error) => return telegram_error(&app, error).await,
-    };
-    let Some(telegram) = connection.as_mut() else {
-        return telegram_error(&app, unavailable()).await;
-    };
-    let telegram_id = match telegram.matching_photo(&jpeg).await {
-        Ok(id) => id,
-        Err(error) => return telegram_error(&app, error).await,
-    };
-    match app
-        .repository
-        .lock()
-        .await
-        .add_upload(&name, &original, &jpeg, telegram_id)
-    {
+    match app.add_local_photo(&name, &original, &jpeg).await {
         Ok(()) => ok(),
         Err(_) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -390,40 +375,24 @@ async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> Respon
     }
 }
 async fn photo_history(State(app): State<Arc<App>>) -> Response {
-    let mut connection = match app.connection().await {
-        Ok(connection) => connection,
-        Err(error) => return telegram_error(&app, error).await,
-    };
-    let Some(telegram) = connection.as_mut() else {
-        return telegram_error(&app, unavailable()).await;
-    };
-    match telegram.photo_history().await {
-        Ok(photos) => Json(json!({"photos": photos})).into_response(),
-        Err(error) => telegram_error(&app, error).await,
-    }
+    Json(json!({"photos": app.state().await.photo_cache.photos})).into_response()
+}
+
+async fn refresh_photo_history(State(app): State<Arc<App>>) -> Response {
+    app.refresh_photo_history().await;
+    ok()
 }
 #[derive(Deserialize)]
 struct PhotoId {
     id: String,
 }
 async fn select_history_photo(State(app): State<Arc<App>>, Json(photo): Json<PhotoId>) -> Response {
-    let mut connection = match app.connection().await {
-        Ok(connection) => connection,
-        Err(error) => return telegram_error(&app, error).await,
-    };
-    let Some(telegram) = connection.as_mut() else {
-        return telegram_error(&app, unavailable()).await;
-    };
-    match telegram.has_history_photo(&photo.id).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return api_error(
-                StatusCode::NOT_FOUND,
-                "Telegram photo not found.",
-                MessageInfo::new("photo.telegram_not_found"),
-            );
-        }
-        Err(error) => return telegram_error(&app, error).await,
+    if !app.photo_cache.lock().await.contains(&photo.id) {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "Telegram photo not found in the local cache.",
+            MessageInfo::new("photo.telegram_not_found"),
+        );
     }
     match app.repository.lock().await.add_history_photo(photo.id) {
         Ok(()) => ok(),
@@ -438,21 +407,13 @@ async fn history_photo(State(app): State<Arc<App>>, Path(id): Path<String>) -> R
     history_photo_response(&app, &id).await
 }
 async fn history_photo_response(app: &App, id: &str) -> Response {
-    let mut connection = match app.connection().await {
-        Ok(connection) => connection,
-        Err(error) => return telegram_error(app, error).await,
-    };
-    let Some(telegram) = connection.as_mut() else {
-        return telegram_error(app, unavailable()).await;
-    };
-    match telegram.history_photo(id).await {
-        Ok(Some(bytes)) => ([(header::CONTENT_TYPE, "image/jpeg")], bytes).into_response(),
-        Ok(None) => api_error(
+    match app.photo_cache.lock().await.image(id) {
+        Some(bytes) => ([(header::CONTENT_TYPE, "image/jpeg")], bytes).into_response(),
+        None => api_error(
             StatusCode::NOT_FOUND,
-            "Telegram photo not found.",
+            "Telegram photo not found in the local cache.",
             MessageInfo::new("photo.telegram_not_found"),
         ),
-        Err(error) => telegram_error(app, error).await,
     }
 }
 #[derive(Deserialize)]
@@ -476,8 +437,28 @@ async fn remove(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response
         Err(error) => bad(error),
     }
 }
-async fn photo(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
-    let path = match app.repository.lock().await.photo_path(&id) {
+#[derive(Deserialize)]
+struct PhotoVersion {
+    crop: Option<String>,
+}
+
+async fn photo(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(version): Query<PhotoVersion>,
+) -> Response {
+    let repository = app.repository.lock().await;
+    let current_crop = repository
+        .data
+        .photos
+        .iter()
+        .find(|photo| photo.id == id)
+        .map(|photo| &photo.crop);
+    let cache = version.crop.as_deref().is_some_and(|crop| {
+        serde_json::from_str::<Option<Crop>>(crop).is_ok_and(|crop| current_crop == Some(&crop))
+    });
+    let uncropped = current_crop == Some(&None);
+    let path = match repository.photo_path(&id) {
         Ok(path) => path,
         Err(_) => {
             return api_error(
@@ -487,11 +468,12 @@ async fn photo(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response 
             );
         }
     };
+    drop(repository);
     match tokio::fs::read(path).await {
-        Ok(bytes) => ([(header::CONTENT_TYPE, "image/jpeg")], bytes).into_response(),
+        Ok(bytes) => versioned_media(bytes, "image/jpeg", cache),
         Err(_) => match photo_original_bytes(&app, &id).await {
             Ok(original) => match normalize_photo(&original) {
-                Ok(jpeg) => ([(header::CONTENT_TYPE, "image/jpeg")], jpeg).into_response(),
+                Ok(jpeg) => versioned_media(jpeg, "image/jpeg", cache && uncropped),
                 Err(error) => bad(error),
             },
             Err(response) => *response,
@@ -522,22 +504,17 @@ async fn photo_original_bytes(app: &App, id: &str) -> Result<Vec<u8>, Box<Respon
             MessageInfo::new("photo.local_missing"),
         )));
     };
-    let mut connection = match app.connection().await {
-        Ok(connection) => connection,
-        Err(error) => return Err(Box::new(telegram_error(app, error).await)),
-    };
-    let Some(telegram) = connection.as_mut() else {
-        return Err(Box::new(telegram_error(app, unavailable()).await));
-    };
-    match telegram.history_photo(&telegram_id).await {
-        Ok(Some(bytes)) => Ok(bytes),
-        Ok(None) => Err(Box::new(api_error(
-            StatusCode::NOT_FOUND,
-            "Telegram photo not found.",
-            MessageInfo::new("photo.telegram_not_found"),
-        ))),
-        Err(error) => Err(Box::new(telegram_error(app, error).await)),
-    }
+    app.photo_cache
+        .lock()
+        .await
+        .image(&telegram_id)
+        .ok_or_else(|| {
+            Box::new(api_error(
+                StatusCode::NOT_FOUND,
+                "Telegram photo not found in the local cache.",
+                MessageInfo::new("photo.telegram_not_found"),
+            ))
+        })
 }
 
 async fn original_photo(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
@@ -583,13 +560,16 @@ async fn save_crop(
     };
     // Rotation also holds this lock while linking the image it uploaded.
     let _connection = app.lock_telegram().await;
-    match app
+    let result = app
         .repository
         .lock()
         .await
-        .save_crop(&id, request.crop, &original)
-    {
-        Ok(()) => ok(),
+        .save_crop(&id, request.crop, &original);
+    match result {
+        Ok(()) => match app.match_cropped_photo(&id).await {
+            Ok(()) => ok(),
+            Err(error) => bad(error),
+        },
         Err(error) => bad(error),
     }
 }
@@ -918,7 +898,7 @@ mod tests {
         app.repository
             .lock()
             .await
-            .add_upload("Portrait", b"jpeg", b"jpeg", None)
+            .add_upload("Portrait", b"jpeg", b"jpeg", None, true)
             .unwrap();
         let photo_id = app.state().await.library.photos[0].id.clone();
         app.repository
@@ -1072,7 +1052,7 @@ mod tests {
         app.repository
             .lock()
             .await
-            .add_upload("Portrait", b"local jpeg", b"local jpeg", None)
+            .add_upload("Portrait", b"local jpeg", b"local jpeg", None, true)
             .unwrap();
         let photo_id = app.state().await.library.photos[0].id.clone();
         let router = accounts_router(accounts);
@@ -1108,7 +1088,7 @@ mod tests {
             )))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     }
 
@@ -1132,11 +1112,29 @@ mod tests {
         app.repository
             .lock()
             .await
-            .add_upload("test", &original, &jpeg, Some("42".into()))
+            .add_upload("test", &original, &jpeg, Some("42".into()), true)
             .unwrap();
         let id = app.state().await.library.photos[0].id.clone();
         let path = format!("/api/accounts/{account}/photos/{id}");
         let router = accounts_router(accounts);
+        for (suffix, expected) in [
+            ("?crop=null", MEDIA_CACHE),
+            ("?crop=invalid", "no-store"),
+            ("", "no-store"),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(request(&format!("{path}{suffix}")))
+                .await
+                .unwrap();
+            assert_eq!(response.headers()[header::CACHE_CONTROL], expected);
+        }
+        let response = router
+            .clone()
+            .oneshot(request(&format!("/api/photos/{id}?crop=null")))
+            .await
+            .unwrap();
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         let response = router
             .clone()
             .oneshot(request(&format!("{path}/original")))
@@ -1182,6 +1180,20 @@ mod tests {
             StatusCode::NO_CONTENT
         );
         assert!(app.state().await.library.photos[0].telegram_id.is_none());
+        let stale = router
+            .clone()
+            .oneshot(request(&format!("{path}?crop=null")))
+            .await
+            .unwrap();
+        assert_eq!(stale.headers()[header::CACHE_CONTROL], "no-store");
+        let current = router
+            .clone()
+            .oneshot(request(&format!(
+                "{path}?crop=%7B%22x%22%3A0%2C%22y%22%3A0%2C%22size%22%3A0.5%7D"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(current.headers()[header::CACHE_CONTROL], MEDIA_CACHE);
         let response = router.clone().oneshot(request(&path)).await.unwrap();
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -1200,38 +1212,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn photo_upload_requires_telegram_and_selection_removal_persists() {
+    async fn local_photo_uploads_work_during_cooldown_and_selection_removal_persists() {
         let dir = tempfile::tempdir().unwrap();
         let app = App::open(dir.path().into(), None).unwrap();
+        app.record_telegram_error(&TelegramError {
+            info: MessageInfo::new("telegram.cooldown"),
+            message: "Flood wait".into(),
+            retry_after: Some(3600),
+            unauthorized: false,
+        })
+        .await;
         let router = router(app.clone());
-        let mut png = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::new_rgb8(180, 180)
+        for value in 0..12 {
+            let mut png = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                180,
+                180,
+                image::Rgb([value, 0, 0]),
+            ))
             .write_to(&mut png, image::ImageFormat::Png)
             .unwrap();
-        let mut multipart = b"--celine-test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"portrait.png\"\r\nContent-Type: image/png\r\n\r\n".to_vec();
-        multipart.extend_from_slice(png.get_ref());
-        multipart.extend_from_slice(b"\r\n--celine-test--\r\n");
-        let req = Request::builder()
-            .method("POST")
-            .uri("/api/photos")
-            .header(header::HOST, ADDRESS)
-            .header(
-                header::CONTENT_TYPE,
-                "multipart/form-data; boundary=celine-test",
-            )
-            .body(Body::from(multipart))
-            .unwrap();
-        assert_eq!(
-            router.clone().oneshot(req).await.unwrap().status(),
-            StatusCode::BAD_GATEWAY
+            let mut multipart = b"--celine-test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"portrait.png\"\r\nContent-Type: image/png\r\n\r\n".to_vec();
+            multipart.extend_from_slice(png.get_ref());
+            multipart.extend_from_slice(b"\r\n--celine-test--\r\n");
+            let req = Request::builder()
+                .method("POST")
+                .uri("/api/photos")
+                .header(header::HOST, ADDRESS)
+                .header(
+                    header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=celine-test",
+                )
+                .body(Body::from(multipart))
+                .unwrap();
+            assert_eq!(
+                router.clone().oneshot(req).await.unwrap().status(),
+                StatusCode::NO_CONTENT
+            );
+        }
+        let state = app.state().await;
+        assert_eq!(state.library.photos.len(), 12);
+        assert!(
+            state
+                .library
+                .photos
+                .iter()
+                .all(|photo| !photo.history_checked)
         );
-        assert!(app.state().await.library.photos.is_empty());
-        let jpeg = normalize_photo(png.get_ref()).unwrap();
-        app.repository
-            .lock()
-            .await
-            .add_upload("portrait.png", &jpeg, &jpeg, None)
-            .unwrap();
         let id = app.state().await.library.photos[0].id.clone();
         assert_eq!(
             router
@@ -1255,7 +1282,88 @@ mod tests {
         drop(router);
         drop(app);
         let restored = App::open(dir.path().into(), None).unwrap();
-        assert!(restored.state().await.library.photos.is_empty());
+        assert_eq!(restored.state().await.library.photos.len(), 11);
+    }
+    #[tokio::test]
+    async fn cached_history_can_be_browsed_selected_and_edited_during_cooldown() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::open(dir.path().into(), None).unwrap();
+        let jpeg = include_bytes!("../web/public/logo.jpg");
+        {
+            let mut cache = app.photo_cache.lock().await;
+            cache.set_history(vec!["42".into()]).unwrap();
+            cache.store("42", jpeg).unwrap();
+        }
+        app.record_telegram_error(&TelegramError {
+            info: MessageInfo::new("telegram.cooldown"),
+            message: "Flood wait".into(),
+            retry_after: Some(3600),
+            unauthorized: false,
+        })
+        .await;
+        let router = router(app.clone());
+        for path in ["/api/photos/history", "/api/photos/history/42"] {
+            assert_eq!(
+                router
+                    .clone()
+                    .oneshot(request(path))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK
+            );
+        }
+        let selection = Request::builder()
+            .method("POST")
+            .uri("/api/photos/history")
+            .header(header::HOST, ADDRESS)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"id":"42"}"#))
+            .unwrap();
+        assert_eq!(
+            router.clone().oneshot(selection).await.unwrap().status(),
+            StatusCode::NO_CONTENT
+        );
+        let id = app.state().await.library.photos[0].id.clone();
+        for path in [
+            format!("/api/photos/{id}"),
+            format!("/api/photos/{id}/original"),
+        ] {
+            assert_eq!(
+                router
+                    .clone()
+                    .oneshot(request(&path))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK
+            );
+        }
+        app.photo_cache.lock().await.set_history(vec![]).unwrap();
+        let stale_selection = Request::builder()
+            .method("POST")
+            .uri("/api/photos/history")
+            .header(header::HOST, ADDRESS)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"id":"42"}"#))
+            .unwrap();
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(stale_selection)
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            router
+                .oneshot(request(&format!("/api/photos/{id}/original")))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
     }
     #[tokio::test]
     async fn manual_telegram_paths_honor_persisted_cooldown() {
@@ -1276,17 +1384,12 @@ mod tests {
             "/api/emojis/1/thumbnail",
             "/api/emojis/1/media",
             "/api/profile/photo",
-            "/api/photos/history",
-            "/api/photos/history/42",
         ] {
             let response = router.clone().oneshot(request(path)).await.unwrap();
             assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
             assert!(response.headers().contains_key(header::RETRY_AFTER));
         }
-        for (path, body) in [
-            ("/api/auth/qr", ""),
-            ("/api/photos/history", r#"{"id":"42"}"#),
-        ] {
+        for (path, body) in [("/api/auth/qr", "")] {
             let req = Request::builder()
                 .method("POST")
                 .uri(path)
@@ -1309,7 +1412,7 @@ mod tests {
         app.repository
             .lock()
             .await
-            .add_upload("Portrait", b"jpeg", b"jpeg", None)
+            .add_upload("Portrait", b"jpeg", b"jpeg", None, true)
             .unwrap();
         let choice = crate::telegram::EmojiChoice {
             id: "9223372036854775806".into(),

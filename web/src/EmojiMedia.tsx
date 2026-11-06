@@ -1,6 +1,5 @@
 import { createEffect, createMemo, createSignal, onSettled, Show, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import lottie from "lottie-web/build/player/lottie_light";
 import type { AnimationItem } from "lottie-web";
 import { loadEmojiMedia } from "./emoji-media";
 
@@ -52,6 +51,9 @@ export function EmojiMedia(props: {
                 if (abort.signal.aborted) return;
                 const animate = !matchMedia("(prefers-reduced-motion: reduce)").matches;
                 if (data.format === "tgs") {
+                    const { default: lottie } =
+                        await import("lottie-web/build/player/lottie_light");
+                    if (abort.signal.aborted) return;
                     animation = lottie.loadAnimation({
                         container: content,
                         renderer: "svg",

@@ -7,12 +7,35 @@ import { createAutosave } from "./autosave";
 import { createEmojiPacks } from "./emoji-packs";
 import { EmojiMedia } from "./EmojiMedia";
 import { PhotoDialog } from "./PhotoDialog";
+import { photoMatchMessage } from "./photo-status";
 import { SortableList } from "./SortableList";
 import { serverMessage, t } from "./i18n";
 import { Notifications } from "./notifications";
 import { createNotifications } from "./notification-center";
 import { resetTilt, tilt } from "./tilt";
-import { Button, Input, Label } from "./components/ui";
+import {
+    Button,
+    Card,
+    Checkbox,
+    CheckboxControl,
+    CheckboxInput,
+    CheckboxLabel,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectLabel,
+    SelectPortal,
+    SelectTrigger,
+    SelectValue,
+    Tabs,
+    TabsContent,
+    TabsIndicator,
+    TabsList,
+    TabsTrigger,
+    TextField,
+    TextFieldInput,
+    TextFieldLabel,
+} from "./components/ui";
 
 type AccountActions = Actions & { api: AccountApi };
 type Notify = (message: string, action?: () => void) => void;
@@ -303,119 +326,106 @@ function AccountWorkspace(
                 />
             }
         >
-            <nav
-                class="mt-6! mb-0! inline-flex! gap-1! rounded-xl bg-muted p-1"
-                aria-label={t("rotationSettings")}
+            <Tabs
+                class="mt-6"
+                value={tab()}
+                onChange={(value) => setTab(value === "emojis" ? "emojis" : "photos")}
             >
-                <button
-                    type="button"
-                    class={[
-                        "min-h-10 rounded-lg border-0! px-4! text-sm font-semibold motion-safe:transition-[color,background-color,box-shadow,scale] motion-safe:duration-200 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                        tab() === "photos"
-                            ? "bg-surface text-foreground shadow-sm"
-                            : "bg-transparent text-muted-foreground hover:text-foreground",
-                    ]}
-                    aria-pressed={tab() === "photos" ? "true" : "false"}
-                    aria-controls="photos-panel"
-                    onClick={() => setTab("photos")}
-                >
-                    {t("profilePhotos")}
-                </button>
-                <button
-                    type="button"
-                    class={[
-                        "min-h-10 rounded-lg border-0! px-4! text-sm font-semibold motion-safe:transition-[color,background-color,box-shadow,scale] motion-safe:duration-200 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                        tab() === "emojis"
-                            ? "bg-surface text-foreground shadow-sm"
-                            : "bg-transparent text-muted-foreground hover:text-foreground",
-                    ]}
-                    aria-pressed={tab() === "emojis" ? "true" : "false"}
-                    aria-controls="emojis-panel"
-                    onClick={() => setTab("emojis")}
-                >
-                    {t("emojiStatus")}
-                </button>
-            </nav>
-            <div class="relative">
-                <div
-                    id="photos-panel"
-                    inert={tab() !== "photos"}
-                    aria-hidden={tab() !== "photos" ? "true" : undefined}
-                    class={[
-                        "motion-safe:transition-[opacity,translate] motion-safe:duration-200 motion-safe:ease-out",
-                        tab() === "photos"
-                            ? "relative opacity-100 translate-y-0"
-                            : "pointer-events-none invisible absolute inset-x-0 top-0 opacity-0 -translate-y-2",
-                    ]}
-                >
-                    <Photos
-                        api={props.api}
-                        notify={props.notify}
-                        photos={props.state.photos}
-                        currentPhotoId={
-                            props.state.applied_settings ? props.state.current_photo_id : null
-                        }
-                        busy={props.busy}
-                        perform={props.perform}
-                        refresh={props.refresh}
-                        autosave={photoOrder}
-                    />
-                    <Rotation
-                        api={props.api}
-                        target="photo"
-                        settings={props.state.settings}
-                        count={props.state.photos.length}
-                        next={props.state.next_rotation_at}
-                        now={props.now}
-                        busy={props.busy && !props.reordering}
-                        locked={props.busy}
-                        perform={props.perform}
-                        refresh={props.refresh}
-                        applied={props.state.applied_settings}
-                        beforeAction={photoOrder.flush}
-                        reportSave={props.reportSave}
-                    />
-                </div>
-                <div
-                    id="emojis-panel"
-                    inert={tab() !== "emojis"}
-                    aria-hidden={tab() !== "emojis" ? "true" : undefined}
-                    class={[
-                        "motion-safe:transition-[opacity,translate] motion-safe:duration-200 motion-safe:ease-out",
-                        tab() === "emojis"
-                            ? "relative opacity-100 translate-y-0"
-                            : "pointer-events-none invisible absolute inset-x-0 top-0 opacity-0 translate-y-2",
-                    ]}
-                >
-                    <EmojiPicker
-                        api={props.api}
-                        notify={props.notify}
-                        selected={props.state.selected_emoji_ids}
-                        selectedEmojis={props.state.selected_emojis}
-                        premium={premium()}
-                        busy={props.busy}
-                        perform={props.perform}
-                        autosave={emojis}
-                    />
-                    <Show when={premium()}>
+                <TabsList aria-label={t("rotationSettings")}>
+                    <TabsTrigger value="photos" aria-controls="photos-panel">
+                        {t("profilePhotos")}
+                    </TabsTrigger>
+                    <TabsTrigger value="emojis" aria-controls="emojis-panel">
+                        {t("emojiStatus")}
+                    </TabsTrigger>
+                    <TabsIndicator />
+                </TabsList>
+                <div class="relative">
+                    <TabsContent
+                        value="photos"
+                        id="photos-panel"
+                        forceMount
+                        inert={tab() !== "photos"}
+                        aria-hidden={tab() !== "photos" ? "true" : undefined}
+                        class={[
+                            "motion-safe:transition-[opacity,translate] motion-safe:duration-200 motion-safe:ease-out",
+                            tab() === "photos"
+                                ? "relative opacity-100 translate-y-0"
+                                : "pointer-events-none invisible absolute inset-x-0 top-0 opacity-0 -translate-y-2",
+                        ]}
+                    >
+                        <Photos
+                            api={props.api}
+                            notify={props.notify}
+                            photos={props.state.photos}
+                            photoCache={props.state.photo_cache}
+                            currentPhotoId={
+                                props.state.applied_settings ? props.state.current_photo_id : null
+                            }
+                            busy={props.busy}
+                            perform={props.perform}
+                            refresh={props.refresh}
+                            autosave={photoOrder}
+                        />
                         <Rotation
                             api={props.api}
-                            target="emoji"
-                            settings={props.state.emoji_settings}
-                            count={(emojis.draft() ?? props.state.selected_emoji_ids).length}
-                            next={props.state.next_emoji_rotation_at}
+                            target="photo"
+                            settings={props.state.settings}
+                            count={props.state.photos.length}
+                            next={props.state.next_rotation_at}
                             now={props.now}
                             busy={props.busy && !props.reordering}
                             locked={props.busy}
                             perform={props.perform}
                             refresh={props.refresh}
-                            applied={props.state.applied_emoji_settings}
-                            beforeAction={emojis.flush}
+                            applied={props.state.applied_settings}
+                            beforeAction={photoOrder.flush}
                             reportSave={props.reportSave}
                         />
-                    </Show>
+                    </TabsContent>
+                    <TabsContent
+                        value="emojis"
+                        id="emojis-panel"
+                        forceMount
+                        inert={tab() !== "emojis"}
+                        aria-hidden={tab() !== "emojis" ? "true" : undefined}
+                        class={[
+                            "motion-safe:transition-[opacity,translate] motion-safe:duration-200 motion-safe:ease-out",
+                            tab() === "emojis"
+                                ? "relative opacity-100 translate-y-0"
+                                : "pointer-events-none invisible absolute inset-x-0 top-0 opacity-0 translate-y-2",
+                        ]}
+                    >
+                        <EmojiPicker
+                            api={props.api}
+                            notify={props.notify}
+                            selected={props.state.selected_emoji_ids}
+                            selectedEmojis={props.state.selected_emojis}
+                            premium={premium()}
+                            busy={props.busy}
+                            perform={props.perform}
+                            autosave={emojis}
+                        />
+                        <Show when={premium()}>
+                            <Rotation
+                                api={props.api}
+                                target="emoji"
+                                settings={props.state.emoji_settings}
+                                count={(emojis.draft() ?? props.state.selected_emoji_ids).length}
+                                next={props.state.next_emoji_rotation_at}
+                                now={props.now}
+                                busy={props.busy && !props.reordering}
+                                locked={props.busy}
+                                perform={props.perform}
+                                refresh={props.refresh}
+                                applied={props.state.applied_emoji_settings}
+                                beforeAction={emojis.flush}
+                                reportSave={props.reportSave}
+                            />
+                        </Show>
+                    </TabsContent>
                 </div>
-            </div>
+            </Tabs>
         </Show>
     );
 }
@@ -424,6 +434,7 @@ function Photos(
     props: AccountActions & {
         notify: Notify;
         photos: State["photos"];
+        photoCache: State["photo_cache"];
         currentPhotoId: string | null;
         refresh: () => Promise<void>;
         autosave: ReturnType<typeof createAutosave<string[]>>;
@@ -442,9 +453,6 @@ function Photos(
     // Only the initial empty library opens the picker; later updates preserve the user’s choice.
     const [pickerOpen, setPickerOpen] = createSignal(untrack(() => props.photos.length === 0));
     const [draggingFiles, setDraggingFiles] = createSignal(false);
-    const [history, setHistory] = createSignal<{ id: string }[]>([]);
-    const [loading, setLoading] = createSignal(true);
-    const [historyError, setHistoryError] = createSignal("");
     const [selecting, setSelecting] = createSignal(false);
     const [uploading, setUploading] = createSignal(false);
     const [photoDialog, setPhotoDialog] = createSignal<{
@@ -452,35 +460,20 @@ function Photos(
         edit: boolean;
     }>();
     let editButton: HTMLButtonElement | undefined;
-    let historyRequest = 0;
+    const [refreshingHistory, setRefreshingHistory] = createSignal(false);
     let pickerSummary!: HTMLElement;
 
-    async function loadHistory() {
-        const requestId = ++historyRequest;
-        setLoading(true);
-        setHistoryError("");
+    async function refreshHistory() {
+        setRefreshingHistory(true);
         try {
-            const data = await props.api.request("photos/history");
-            if (requestId === historyRequest) setHistory(data.photos);
+            await props.api.request("photos/history/refresh", "POST");
+            await props.refresh();
         } catch (failure) {
-            if (requestId === historyRequest) {
-                const message =
-                    failure instanceof RequestError ? failure.message : t("cannotLoadPhotos");
-                setHistoryError(message);
-                props.notify(message, () => void loadHistory());
-            }
+            props.notify(failure instanceof RequestError ? failure.message : t("cannotLoadPhotos"));
         } finally {
-            if (requestId === historyRequest) setLoading(false);
+            setRefreshingHistory(false);
         }
     }
-
-    createEffect(pickerOpen, (open) => {
-        if (open) void loadHistory();
-        else historyRequest++;
-    });
-    onCleanup(() => {
-        historyRequest++;
-    });
 
     function closePicker() {
         setPickerOpen(false);
@@ -577,7 +570,7 @@ function Photos(
             />
             <p class="hint">{t("photoUploadHint")}</p>
             <Show when={uploading()}>
-                <p role="status">{t("checkingPhotoHistory")}</p>
+                <p role="status">{t("savingPhotos")}</p>
             </Show>
             <SortableList
                 kind="photo"
@@ -589,7 +582,7 @@ function Photos(
                     imageUrl: props.api.selectedPhotoUrl(photo),
                     reorderLabel: photo.generated_name ? t("reorderTelegramPhoto") : undefined,
                     removeLabel: photo.generated_name ? t("removeTelegramPhoto") : undefined,
-                    badge: photo.telegram_id == null ? t("photoNotLinked") : undefined,
+                    badge: photoMatchMessage(photo, props.photoCache),
                     current: photo.id === props.currentPhotoId,
                 }))}
                 edit={(id, button) => {
@@ -642,7 +635,6 @@ function Photos(
                 open={pickerOpen()}
                 onToggle={(event) => {
                     const open = event.currentTarget.open;
-                    if (open && !pickerOpen()) setLoading(true);
                     setPickerOpen(open);
                 }}
                 onKeyDown={(event) => {
@@ -663,46 +655,51 @@ function Photos(
                     class="photo-history"
                     role="region"
                     aria-label={t("telegramProfilePhotos")}
-                    aria-busy={loading() ? "true" : "false"}
+                    aria-busy={props.photoCache.status === "refreshing" ? "true" : "false"}
                 >
-                    <Show when={loading()}>
-                        <p class="visually-hidden" role="status">
-                            {t("loadingPhotos")}
+                    <div class="flex flex-wrap items-center gap-2">
+                        <p class="hint" role="status">
+                            {t(
+                                props.photoCache.status === "refreshing"
+                                    ? "photoCacheRefreshing"
+                                    : props.photoCache.status === "error"
+                                      ? "photoCacheError"
+                                      : "photoCacheReady",
+                            )}
                         </p>
-                        <div class="photo-choices" aria-hidden="true">
-                            <For each={[0, 1, 2, 3, 4, 5]}>
-                                {() => <span class="photo-skeleton" />}
+                        <Button
+                            variant="secondary"
+                            disabled={
+                                refreshingHistory() || props.photoCache.status === "refreshing"
+                            }
+                            onClick={() => void refreshHistory()}
+                        >
+                            {t("refreshPhotoCache")}
+                        </Button>
+                    </div>
+                    <Show
+                        when={props.photoCache.photos.length}
+                        fallback={
+                            <Show when={props.photoCache.status === "ready"}>
+                                <p class="hint">{t("noTelegramPhotos")}</p>
+                            </Show>
+                        }
+                    >
+                        <div class="photo-choices">
+                            <For each={props.photoCache.photos.map((photo) => photo.id)}>
+                                {(id, index) => (
+                                    <PhotoChoice
+                                        url={props.api.photoHistoryUrl(id)}
+                                        label={t("includeTelegramPhoto", { number: index() + 1 })}
+                                        checked={props.photos.some(
+                                            (item) => item.telegram_id === id,
+                                        )}
+                                        disabled={props.busy || selecting()}
+                                        toggle={() => void togglePhoto(id)}
+                                    />
+                                )}
                             </For>
                         </div>
-                    </Show>
-                    <Show when={historyError()}>
-                        <button type="button" onClick={() => void loadHistory()}>
-                            {t("retry")}
-                        </button>
-                    </Show>
-                    <Show when={!loading() && !historyError()}>
-                        <Show
-                            when={history().length}
-                            fallback={<p class="hint">{t("noTelegramPhotos")}</p>}
-                        >
-                            <div class="photo-choices">
-                                <For each={history()}>
-                                    {(photo, index) => (
-                                        <PhotoChoice
-                                            url={props.api.photoHistoryUrl(photo.id)}
-                                            label={t("includeTelegramPhoto", {
-                                                number: index() + 1,
-                                            })}
-                                            checked={props.photos.some(
-                                                (item) => item.telegram_id === photo.id,
-                                            )}
-                                            disabled={props.busy || selecting()}
-                                            toggle={() => void togglePhoto(photo.id)}
-                                        />
-                                    )}
-                                </For>
-                            </div>
-                        </Show>
                     </Show>
                 </div>
                 <p class="hint">{t("photoSelectionHint")}</p>
@@ -782,44 +779,59 @@ function DurationField(props: {
 }) {
     // Choose the initial display unit once; edits and server refreshes must not reset it.
     const [unit, setUnit] = createSignal(untrack(() => Duration.unitFor(props.seconds)));
+    const units = Duration.units.map((item) => ({
+        value: String(item.seconds),
+        label: t(item.label),
+    }));
 
     return (
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Label class="min-w-20 text-foreground" for={props.id}>
-                {props.label}
-            </Label>
+        <TextField
+            class="flex flex-wrap items-center gap-x-4 gap-y-2"
+            value={Number.isFinite(props.seconds) ? String(props.seconds / unit()) : ""}
+            disabled={props.disabled}
+            required
+            validationState={props.isInvalid ? "invalid" : "valid"}
+        >
+            <TextFieldLabel class="min-w-20 text-foreground">{props.label}</TextFieldLabel>
             <div class="flex min-w-0 flex-1 items-center gap-2">
-                <Input
-                    class="w-28! flex-[0_1_7rem] rounded-lg! border-0! bg-background! tabular-nums"
+                <TextFieldInput
+                    class="w-28 flex-[0_1_7rem] rounded-lg bg-background tabular-nums"
                     id={props.id}
                     type="number"
                     inputmode="decimal"
-                    required
                     step="any"
                     min={props.minimum / unit()}
                     max={props.maximum == null ? undefined : props.maximum / unit()}
-                    disabled={props.disabled}
-                    value={props.seconds / unit()}
                     onInvalid={props.invalid}
-                    aria-invalid={props.isInvalid ? "true" : undefined}
                     aria-describedby={props.isInvalid ? props.errorId : undefined}
                     onInput={(event) =>
                         props.change(Duration.seconds(event.currentTarget.valueAsNumber, unit()))
                     }
                 />
-                <select
-                    class="min-h-10 rounded-lg border-0 bg-background px-3 text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
-                    aria-label={t("durationUnit", { label: props.label })}
+                <Select
+                    class="w-auto"
+                    options={units}
+                    optionValue="value"
+                    optionTextValue="label"
+                    value={units.find((item) => Number(item.value) === unit())}
+                    onChange={(item) => item && setUnit(Number(item.value))}
                     disabled={props.disabled}
-                    value={unit()}
-                    onChange={(event) => setUnit(Number(event.currentTarget.value))}
+                    disallowEmptySelection
+                    itemComponent={(item) => (
+                        <SelectItem item={item.item}>{item.item.rawValue.label}</SelectItem>
+                    )}
                 >
-                    <For each={Duration.units}>
-                        {(item) => <option value={item.seconds}>{t(item.label)}</option>}
-                    </For>
-                </select>
+                    <SelectTrigger aria-label={t("durationUnit", { label: props.label })}>
+                        <SelectValue<(typeof units)[number]>>
+                            {(state) => state.selectedOption()?.label}
+                        </SelectValue>
+                    </SelectTrigger>
+                    <SelectPortal>
+                        <SelectContent />
+                    </SelectPortal>
+                </Select>
             </div>
-        </div>
+        </TextField>
     );
 }
 
@@ -840,6 +852,10 @@ function Rotation(
     let jitterDetails!: HTMLDetailsElement;
     const endpoint = () => (props.target === "photo" ? "settings" : "emojis/settings");
     const fieldId = (field: string) => `${props.target}-${field}`;
+    const jitterModes = [
+        { value: "auto", label: t("automaticJitter") },
+        { value: "custom", label: t("custom") },
+    ];
     const autosave = createAutosave<Settings>(
         (value) =>
             props.api.request(endpoint(), "PUT", { ...value, enabled: props.settings.enabled }),
@@ -903,153 +919,173 @@ function Rotation(
     }
 
     return (
-        <section
-            class="rounded-2xl bg-surface p-4 sm:p-5"
-            aria-labelledby={fieldId("rotation-title")}
-        >
-            <h2 class="m-0! text-base! font-semibold tracking-tight" id={fieldId("rotation-title")}>
-                {props.target === "photo" ? t("photoRotation") : t("emojiRotation")}
-            </h2>
-            <form
-                class="my-5! grid gap-4!"
-                onSubmit={(event) => {
-                    event.preventDefault();
-                }}
-            >
-                <label class="flex min-h-10 cursor-pointer items-center gap-3 self-start justify-self-start text-sm font-semibold">
-                    {t("randomOrder")}
-                    <input
-                        class="size-5 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                        type="checkbox"
-                        checked={settings().mode === "random"}
-                        disabled={props.busy}
-                        onChange={(event) =>
-                            edit({ mode: event.currentTarget.checked ? "random" : "ordered" })
-                        }
-                    />
-                </label>
-                <DurationField
-                    id={fieldId("interval")}
-                    label={t("delay")}
-                    seconds={settings().interval_secs}
-                    minimum={1}
-                    disabled={props.busy}
-                    isInvalid={intervalInvalid()}
-                    errorId={fieldId("invalid-settings")}
-                    change={(seconds) => edit({ interval_secs: seconds })}
-                />
-                <details
-                    class="group rounded-xl bg-muted/60 px-4 py-2 text-sm"
-                    ref={(element) => {
-                        jitterDetails = element;
+        <section aria-labelledby={fieldId("rotation-title")}>
+            <Card class="gap-0 rounded-2xl p-4 sm:p-5">
+                <h2
+                    class="m-0! text-base! font-semibold tracking-tight"
+                    id={fieldId("rotation-title")}
+                >
+                    {props.target === "photo" ? t("photoRotation") : t("emojiRotation")}
+                </h2>
+                <form
+                    class="my-5! grid gap-4!"
+                    onSubmit={(event) => {
+                        event.preventDefault();
                     }}
                 >
-                    <summary
-                        class="relative cursor-pointer py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                        aria-label={
-                            settings().jitter_secs == null
-                                ? t("jitterAutomaticLabel")
-                                : t("jitterCustomLabel")
-                        }
-                        aria-describedby={fieldId("jitter-help")}
+                    <Checkbox
+                        class="flex min-h-10 items-center gap-3 self-start justify-self-start"
+                        checked={settings().mode === "random"}
+                        disabled={props.busy}
+                        onChange={(checked) => edit({ mode: checked ? "random" : "ordered" })}
                     >
-                        {t("jitter")}
-                        <span class="ms-1 inline-grid size-5 place-items-center rounded-full bg-surface text-xs text-muted-foreground">
-                            <span aria-hidden="true">?</span>
-                            <span
-                                class="invisible absolute bottom-full inset-s-0 z-10 w-64 max-w-full rounded-lg bg-foreground px-3 py-2 text-sm font-normal text-background shadow-lg group-focus-within:visible group-hover:visible"
-                                id={fieldId("jitter-help")}
-                                role="tooltip"
-                            >
-                                {t("jitterHelp")}
+                        <CheckboxLabel class="cursor-pointer font-semibold">
+                            {t("randomOrder")}
+                        </CheckboxLabel>
+                        <CheckboxInput />
+                        <CheckboxControl class="size-5 cursor-pointer" />
+                    </Checkbox>
+                    <DurationField
+                        id={fieldId("interval")}
+                        label={t("delay")}
+                        seconds={settings().interval_secs}
+                        minimum={1}
+                        disabled={props.busy}
+                        isInvalid={intervalInvalid()}
+                        errorId={fieldId("invalid-settings")}
+                        change={(seconds) => edit({ interval_secs: seconds })}
+                    />
+                    <details
+                        class="rounded-xl bg-muted/60 px-4 py-2 text-sm"
+                        ref={(element) => {
+                            jitterDetails = element;
+                        }}
+                    >
+                        <summary
+                            class="group relative cursor-pointer py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            aria-label={
+                                settings().jitter_secs == null
+                                    ? t("jitterAutomaticLabel")
+                                    : t("jitterCustomLabel")
+                            }
+                            aria-describedby={fieldId("jitter-help")}
+                        >
+                            {t("jitter")}
+                            <span class="ms-1 inline-grid size-5 place-items-center rounded-full bg-surface text-xs text-muted-foreground">
+                                <span aria-hidden="true">?</span>
+                                <span
+                                    class="invisible absolute bottom-full inset-s-0 z-10 w-64 max-w-full rounded-lg bg-foreground px-3 py-2 text-sm font-normal text-background shadow-lg group-focus-visible:visible group-hover:visible"
+                                    id={fieldId("jitter-help")}
+                                    role="tooltip"
+                                >
+                                    {t("jitterHelp")}
+                                </span>
                             </span>
-                        </span>
-                        <span class="ms-3 text-sm font-normal text-muted-foreground">
-                            {settings().jitter_secs == null ? t("automatic") : t("custom")}
-                        </span>
-                    </summary>
-                    <div class="my-2 grid gap-2">
-                        <Label for={fieldId("jitter-mode")}>{t("jitterSetting")}</Label>
-                        <select
-                            class="min-h-10 rounded-lg border-0 bg-background px-3 text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
-                            id={fieldId("jitter-mode")}
-                            disabled={props.busy}
-                            value={settings().jitter_secs == null ? "auto" : "custom"}
-                            onChange={(event) =>
-                                edit({
-                                    jitter_secs:
-                                        event.currentTarget.value === "auto"
-                                            ? null
-                                            : Duration.defaultJitter(settings().interval_secs),
-                                })
+                            <span class="ms-3 text-sm font-normal text-muted-foreground">
+                                {settings().jitter_secs == null ? t("automatic") : t("custom")}
+                            </span>
+                        </summary>
+                        <div class="my-2 grid gap-2">
+                            <Select
+                                options={jitterModes}
+                                optionValue="value"
+                                optionTextValue="label"
+                                value={
+                                    settings().jitter_secs == null ? jitterModes[0] : jitterModes[1]
+                                }
+                                disabled={props.busy}
+                                disallowEmptySelection
+                                onChange={(item) => {
+                                    if (item)
+                                        edit({
+                                            jitter_secs:
+                                                item.value === "auto"
+                                                    ? null
+                                                    : Duration.defaultJitter(
+                                                          settings().interval_secs,
+                                                      ),
+                                        });
+                                }}
+                                itemComponent={(item) => (
+                                    <SelectItem item={item.item}>
+                                        {item.item.rawValue.label}
+                                    </SelectItem>
+                                )}
+                            >
+                                <SelectLabel>{t("jitterSetting")}</SelectLabel>
+                                <SelectTrigger id={fieldId("jitter-mode")}>
+                                    <SelectValue<(typeof jitterModes)[number]>>
+                                        {(state) => state.selectedOption()?.label}
+                                    </SelectValue>
+                                </SelectTrigger>
+                                <SelectPortal>
+                                    <SelectContent />
+                                </SelectPortal>
+                            </Select>
+                            <Show when={settings().jitter_secs != null}>
+                                <DurationField
+                                    id={fieldId("jitter")}
+                                    label={t("customJitter")}
+                                    seconds={settings().jitter_secs ?? 0}
+                                    minimum={0}
+                                    maximum={settings().interval_secs - 1}
+                                    disabled={props.busy}
+                                    isInvalid={jitterInvalid()}
+                                    errorId={fieldId("invalid-settings")}
+                                    change={(seconds) => edit({ jitter_secs: seconds })}
+                                    invalid={() => {
+                                        jitterDetails.open = true;
+                                    }}
+                                />
+                            </Show>
+                        </div>
+                    </details>
+                    <span id={fieldId("invalid-settings")} class="visually-hidden">
+                        {t("invalidSettings")}
+                    </span>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <Show
+                            when={props.settings.enabled}
+                            fallback={
+                                <Button
+                                    disabled={props.locked || props.count === 0 || !valid()}
+                                    onClick={() => action("start")}
+                                >
+                                    {t("startRotation")}
+                                </Button>
                             }
                         >
-                            <option value="auto">{t("automaticJitter")}</option>
-                            <option value="custom">{t("custom")}</option>
-                        </select>
-                        <Show when={settings().jitter_secs != null}>
-                            <DurationField
-                                id={fieldId("jitter")}
-                                label={t("customJitter")}
-                                seconds={settings().jitter_secs ?? 0}
-                                minimum={0}
-                                maximum={settings().interval_secs - 1}
-                                disabled={props.busy}
-                                isInvalid={jitterInvalid()}
-                                errorId={fieldId("invalid-settings")}
-                                change={(seconds) => edit({ jitter_secs: seconds })}
-                                invalid={() => {
-                                    jitterDetails.open = true;
-                                }}
-                            />
+                            <Button
+                                disabled={
+                                    props.locked ||
+                                    !valid() ||
+                                    !props.applied ||
+                                    configEqual(settings(), props.applied)
+                                }
+                                onClick={() => action("apply")}
+                            >
+                                {t("applySettings")}
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                disabled={props.locked}
+                                onClick={() => action("stop")}
+                            >
+                                {t("stopRotation")}
+                            </Button>
                         </Show>
                     </div>
-                </details>
-                <span id={fieldId("invalid-settings")} class="visually-hidden">
-                    {t("invalidSettings")}
-                </span>
-                <div class="flex flex-wrap items-center gap-2">
-                    <Show
-                        when={props.settings.enabled}
-                        fallback={
-                            <Button
-                                disabled={props.locked || props.count === 0 || !valid()}
-                                onClick={() => action("start")}
-                            >
-                                {t("startRotation")}
-                            </Button>
-                        }
-                    >
-                        <Button
-                            disabled={
-                                props.locked ||
-                                !valid() ||
-                                !props.applied ||
-                                configEqual(settings(), props.applied)
-                            }
-                            onClick={() => action("apply")}
-                        >
-                            {t("applySettings")}
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            disabled={props.locked}
-                            onClick={() => action("stop")}
-                        >
-                            {t("stopRotation")}
-                        </Button>
-                    </Show>
-                </div>
-            </form>
-            <p class="m-0 text-sm text-muted-foreground tabular-nums" role="status">
-                {props.settings.enabled
-                    ? props.next
-                        ? t(props.target === "photo" ? "nextPhoto" : "nextEmoji", {
-                              time: timeRemaining(props.next, props.now),
-                          })
-                        : t("running")
-                    : t("stopped")}
-            </p>
+                </form>
+                <p class="m-0 text-sm text-muted-foreground tabular-nums" role="status">
+                    {props.settings.enabled
+                        ? props.next
+                            ? t(props.target === "photo" ? "nextPhoto" : "nextEmoji", {
+                                  time: timeRemaining(props.next, props.now),
+                              })
+                            : t("running")
+                        : t("stopped")}
+                </p>
+            </Card>
         </section>
     );
 }
@@ -1077,8 +1113,8 @@ function EmojiPicker(
 
     createEffect(
         () => props.premium && pickerOpen(),
-        (open) => {
-            if (open) untrack(() => void packs.select());
+        (open, wasOpen) => {
+            if (open && !wasOpen) untrack(() => void packs.select());
         },
     );
     createEffect(
@@ -1216,7 +1252,21 @@ function EmojiPicker(
                         aria-labelledby="emoji-pack-title"
                         aria-busy={packs.active?.loading ? "true" : "false"}
                     >
-                        <h3 id="emoji-pack-title">{packs.title}</h3>
+                        <div class="flex items-center justify-between gap-2">
+                            <h2 id="emoji-pack-title" class="text-base">
+                                {packs.title}
+                            </h2>
+                            <Show when={!packs.activeId}>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    aria-disabled={packs.active?.loading ? "true" : undefined}
+                                    onClick={() => void packs.select("")}
+                                >
+                                    {t("refreshEmojiStatuses")}
+                                </Button>
+                            </Show>
+                        </div>
                         <Show when={!packs.active || packs.active.loading}>
                             <p class="visually-hidden" role="status">
                                 {t("loadingEmoji")}
@@ -1242,41 +1292,69 @@ function EmojiPicker(
                             </button>
                         </Show>
                         <Show when={packs.active?.choices}>
-                            {(choices) => (
-                                <Show
-                                    when={choices().length}
-                                    fallback={<p class="hint">{t("emptyEmojiPack")}</p>}
-                                >
-                                    <div class="emojis">
-                                        <For each={choices()}>
-                                            {(emoji) => (
-                                                <label
-                                                    class="emoji-choice"
-                                                    title={emojiSource(emoji)}
-                                                    onPointerMove={tilt}
-                                                    onPointerLeave={resetTilt}
-                                                    onPointerCancel={resetTilt}
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        aria-label={`${emoji.label} (${emojiSource(emoji)})`}
-                                                        checked={selected().includes(emoji.id)}
-                                                        disabled={props.busy}
-                                                        onChange={() => toggle(emoji.id)}
-                                                    />
-                                                    <span class="emoji-preview" aria-hidden="true">
-                                                        <EmojiMedia
-                                                            url={props.api.emojiMediaUrl(emoji.id)}
-                                                            label={emoji.label}
-                                                            textColor={emoji.text_color}
-                                                        />
-                                                    </span>
-                                                </label>
-                                            )}
-                                        </For>
-                                    </div>
-                                </Show>
-                            )}
+                            <For each={packs.groups}>
+                                {(group) => (
+                                    <section>
+                                        <Show when={group.kind !== "pack"}>
+                                            <h3 class="mt-4 mb-1 text-sm font-semibold text-muted-foreground">
+                                                {t(
+                                                    group.kind === "recent"
+                                                        ? "recentEmojiStatuses"
+                                                        : "suggestedEmojiStatuses",
+                                                )}
+                                            </h3>
+                                        </Show>
+                                        <Show
+                                            when={group.choices.length}
+                                            fallback={
+                                                <p class="hint">
+                                                    {t(
+                                                        group.kind === "recent"
+                                                            ? "emptyRecentEmojiStatuses"
+                                                            : "emptyEmojiPack",
+                                                    )}
+                                                </p>
+                                            }
+                                        >
+                                            <div class="emojis">
+                                                <For each={group.choices}>
+                                                    {(emoji) => (
+                                                        <label
+                                                            class="emoji-choice"
+                                                            title={emojiSource(emoji)}
+                                                            onPointerMove={tilt}
+                                                            onPointerLeave={resetTilt}
+                                                            onPointerCancel={resetTilt}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                aria-label={`${emoji.label} (${emojiSource(emoji)})`}
+                                                                checked={selected().includes(
+                                                                    emoji.id,
+                                                                )}
+                                                                disabled={props.busy}
+                                                                onChange={() => toggle(emoji.id)}
+                                                            />
+                                                            <span
+                                                                class="emoji-preview"
+                                                                aria-hidden="true"
+                                                            >
+                                                                <EmojiMedia
+                                                                    url={props.api.emojiMediaUrl(
+                                                                        emoji.id,
+                                                                    )}
+                                                                    label={emoji.label}
+                                                                    textColor={emoji.text_color}
+                                                                />
+                                                            </span>
+                                                        </label>
+                                                    )}
+                                                </For>
+                                            </div>
+                                        </Show>
+                                    </section>
+                                )}
+                            </For>
                         </Show>
                     </div>
                 </div>

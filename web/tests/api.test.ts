@@ -132,6 +132,16 @@ describe("account-scoped requests", () => {
         ]);
     });
 
+    test("requests an asynchronous account-scoped photo cache refresh", async () => {
+        const fetch = spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(null, { status: 204 }),
+        );
+        await accountApi("a/b").request("photos/history/refresh", "POST");
+        expect(
+            fetch.mock.calls.map(([url, options]) => [url, options?.method, options?.body]),
+        ).toEqual([["/api/accounts/a%2Fb/photos/history/refresh", "POST", undefined]]);
+    });
+
     test("loads and selects Telegram history photos without losing ID precision", async () => {
         const id = "9223372036854775806";
         const fetch = spyOn(globalThis, "fetch")

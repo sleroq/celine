@@ -1,6 +1,5 @@
 import { createSignal, onSettled, Show, untrack } from "solid-js";
 import type { AccountApi, Photo } from "./api";
-import { Button } from "./components/ui";
 import { CropEditor } from "./CropEditor";
 import { centeredCrop } from "./crop";
 import { t } from "./i18n";
@@ -86,12 +85,18 @@ export function PhotoDialog(props: {
                             <Show when={error()}>
                                 <p role="alert">{t("cropLoadError")}</p>
                             </Show>
-                        </div>
-                        <div class="mt-4 flex flex-wrap justify-end gap-2">
-                            <Button variant="secondary" onClick={() => props.close()}>
-                                {t("cancel")}
-                            </Button>
-                            <Button onClick={() => setEditing(true)}>{t("cropTitle")}</Button>
+                            <Show when={loaded() && !error()}>
+                                <button
+                                    type="button"
+                                    class="sortable-edit photo-preview-edit shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                    aria-label={t("cropPhoto", { name: props.photo.name })}
+                                    onClick={() => setEditing(true)}
+                                >
+                                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                                        <path d="M6 3v12a3 3 0 0 0 3 3h12M3 6h12a3 3 0 0 1 3 3v12" />
+                                    </svg>
+                                </button>
+                            </Show>
                         </div>
                     </>
                 }

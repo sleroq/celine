@@ -87,7 +87,7 @@ pub struct Photo {
     pub generated_name: Option<bool>,
     #[serde(default)]
     pub telegram_id: Option<String>,
-    // Older libraries need to be matched against Telegram before their first upload.
+    // Unchecked photos must be matched against a fresh history before upload.
     #[serde(default)]
     pub history_checked: bool,
     #[serde(default)]
@@ -402,6 +402,7 @@ impl Repository {
         original: &[u8],
         jpeg: &[u8],
         telegram_id: Option<String>,
+        history_checked: bool,
     ) -> Result<()> {
         let telegram_available = telegram_id.as_ref().is_some_and(|id| {
             !self
@@ -436,7 +437,7 @@ impl Repository {
             } else {
                 None
             },
-            history_checked: true,
+            history_checked,
             crop: None,
         };
         let photos = self.dir.join("photos");
@@ -1028,7 +1029,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut repo = Repository::open(dir.path().into()).unwrap();
         assert!(Repository::open(dir.path().into()).is_err());
-        repo.add_upload("hello", b"jpeg", b"jpeg", None).unwrap();
+        repo.add_upload("hello", b"jpeg", b"jpeg", None, true)
+            .unwrap();
         repo.update(|l| {
             l.update_settings(
                 Settings {
@@ -1157,8 +1159,9 @@ mod tests {
     fn duplicate_images_and_telegram_selections_are_linked_only_once() {
         let dir = tempfile::tempdir().unwrap();
         let mut repo = Repository::open(dir.path().into()).unwrap();
-        repo.add_upload("portrait", b"jpeg", b"jpeg", None).unwrap();
-        repo.add_upload("portrait copy", b"jpeg", b"jpeg", Some("42".into()))
+        repo.add_upload("portrait", b"jpeg", b"jpeg", None, true)
+            .unwrap();
+        repo.add_upload("portrait copy", b"jpeg", b"jpeg", Some("42".into()), true)
             .unwrap();
         repo.add_history_photo("42".into()).unwrap();
         assert_eq!(repo.data.photos.len(), 1);
@@ -1227,7 +1230,7 @@ mod tests {
         let original = png.into_inner();
         let jpeg = normalize_photo(&original).unwrap();
         repository
-            .add_upload("test", &original, &jpeg, Some("42".into()))
+            .add_upload("test", &original, &jpeg, Some("42".into()), true)
             .unwrap();
         let id = repository.data.photos[0].id.clone();
         repository.save_crop(&id, None, &original).unwrap();
@@ -1282,11 +1285,11 @@ mod tests {
         let original_b = original(240);
         let jpeg = normalize_photo(&original_a).unwrap();
         assert_eq!(jpeg, normalize_photo(&original_b).unwrap());
-        repo.add_upload("a", &original_a, &jpeg, Some("42".into()))
+        repo.add_upload("a", &original_a, &jpeg, Some("42".into()), true)
             .unwrap();
-        repo.add_upload("a duplicate", &original_a, &jpeg, Some("42".into()))
+        repo.add_upload("a duplicate", &original_a, &jpeg, Some("42".into()), true)
             .unwrap();
-        repo.add_upload("b", &original_b, &jpeg, Some("42".into()))
+        repo.add_upload("b", &original_b, &jpeg, Some("42".into()), true)
             .unwrap();
         assert_eq!(repo.data.photos.len(), 2);
         assert_eq!(repo.data.photos[0].telegram_id.as_deref(), Some("42"));
@@ -1294,7 +1297,7 @@ mod tests {
         assert_eq!(repo.original(&repo.data.photos[0].id).unwrap(), original_a);
         assert_eq!(repo.original(&repo.data.photos[1].id).unwrap(), original_b);
         // The free Telegram match can link an exact original, but not another crop.
-        repo.add_upload("b duplicate", &original_b, &jpeg, Some("43".into()))
+        repo.add_upload("b duplicate", &original_b, &jpeg, Some("43".into()), true)
             .unwrap();
         assert_eq!(repo.data.photos[1].telegram_id.as_deref(), Some("43"));
         repo.update(|library| {
@@ -1307,7 +1310,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        repo.add_upload("b duplicate", &original_b, &jpeg, Some("44".into()))
+        repo.add_upload("b duplicate", &original_b, &jpeg, Some("44".into()), true)
             .unwrap();
         assert_eq!(repo.data.photos[1].telegram_id, None);
         assert_eq!(repo.data.photos.len(), 2);
@@ -1318,7 +1321,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut repo = Repository::open(dir.path().into()).unwrap();
         block_state_save(dir.path());
-        assert!(repo.add_upload("a", b"original", b"preview", None).is_err());
+        assert!(
+            repo.add_upload("a", b"original", b"preview", None, true)
+                .is_err()
+        );
         assert!(repo.data.photos.is_empty());
         assert_eq!(fs::read_dir(dir.path().join("photos")).unwrap().count(), 0);
     }
@@ -1334,7 +1340,7 @@ mod tests {
                 .unwrap();
             let original = png.into_inner();
             if local {
-                repo.add_upload("a", &original, b"old preview", Some("42".into()))
+                repo.add_upload("a", &original, b"old preview", Some("42".into()), true)
                     .unwrap();
             } else {
                 repo.add_history_photo("42".into()).unwrap();

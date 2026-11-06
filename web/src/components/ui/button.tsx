@@ -1,41 +1,63 @@
+// Adapted from shadcn-solid (MIT): https://github.com/hngngn/shadcn-solid
+import type { ComponentProps } from "@solidjs/web";
 import { omit } from "solid-js";
-import type { JSX } from "@solidjs/web";
+import { Root as ButtonPrimitive } from "@kobalte/core/button";
+import type { VariantProps } from "cva";
 
-type ButtonProps = JSX.ButtonHTMLAttributes<HTMLButtonElement> & {
-    variant?: "default" | "secondary" | "outline" | "ghost" | "destructive";
-    size?: "default" | "sm" | "icon";
-};
+import { cva } from "../../lib/cva";
 
-const variants = {
-    default: "bg-accent text-accent-foreground hover:brightness-90",
-    secondary: "bg-muted text-foreground hover:bg-muted-hover",
-    outline:
-        "border border-solid border-border bg-transparent text-foreground hover:bg-muted-hover",
-    ghost: "bg-transparent text-foreground hover:bg-muted-hover",
-    destructive: "bg-danger text-danger-foreground hover:brightness-90",
-};
+export const buttonVariants = cva({
+    base: [
+        "inline-flex items-center justify-center gap-2 whitespace-nowrap min-h-10 cursor-pointer rounded-md border-0 font-[inherit] font-semibold leading-tight transition-colors [&_svg:not([class*=size-])]:size-4 shrink-0 outline-none",
+        "disabled:cursor-not-allowed disabled:opacity-55",
+        "[&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "aria-invalid:outline-danger",
+    ],
 
-const sizes = {
-    default: "px-3 py-2",
-    sm: "px-2.5 py-2 text-sm",
-    icon: "w-10 p-0",
-};
+    variants: {
+        variant: {
+            default: "bg-accent text-accent-foreground hover:brightness-90",
+            destructive: "bg-danger text-danger-foreground hover:brightness-90",
+            outline: "bg-transparent text-foreground hover:bg-muted-hover",
+            secondary: "bg-muted text-foreground hover:bg-muted-hover",
+            ghost: "bg-transparent text-foreground hover:bg-muted-hover",
+            link: "text-accent underline-offset-4 hover:underline",
+        },
+        size: {
+            default: "px-3 py-2",
+            sm: "px-2.5 py-2 text-sm",
+            lg: "min-h-11 px-6 py-2",
+            icon: "size-10 p-0",
+            "icon-sm": "size-10 p-0 text-sm",
+            "icon-lg": "size-11 p-0",
+        },
+    },
+    defaultVariants: {
+        variant: "default",
+        size: "default",
+    },
+});
 
-export function Button(props: ButtonProps) {
+export type ButtonProps = ComponentProps<typeof ButtonPrimitive<"button">> &
+    VariantProps<typeof buttonVariants>;
+
+export const Button = (props: ButtonProps) => {
     const rest = omit(
         props,
-        (key) => key === "variant" || key === "size" || key === "class" || key === "type",
+        (key) => key === "class" || key === "variant" || key === "size" || key === "type",
     );
+
     return (
-        <button
+        <ButtonPrimitive
             {...rest}
             type={props.type ?? "button"}
-            class={[
-                "inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-md border-0 font-[inherit] font-semibold leading-tight whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-55",
-                variants[props.variant ?? "default"],
-                sizes[props.size ?? "default"],
-                props.class,
-            ]}
+            data-slot="button"
+            class={buttonVariants({
+                variant: props.variant,
+                size: props.size,
+                class: props.class,
+            })}
         />
     );
-}
+};

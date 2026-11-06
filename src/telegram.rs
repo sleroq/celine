@@ -530,16 +530,6 @@ impl Telegram {
         Ok(entries)
     }
 
-    pub async fn has_history_photo(&mut self, id: &str) -> Result<bool, TelegramError> {
-        self.require_available()?;
-        self.require_authorized()?;
-        let id = parse_photo_id(id)?;
-        if !self.history.contains_key(&id) {
-            self.photo_history().await?;
-        }
-        Ok(self.history.contains_key(&id))
-    }
-
     pub async fn history_photo(&mut self, id: &str) -> Result<Option<Vec<u8>>, TelegramError> {
         self.require_available()?;
         self.require_authorized()?;
@@ -581,38 +571,14 @@ impl Telegram {
         Ok(Some((id, bytes)))
     }
 
-    pub async fn matching_photo(&mut self, jpeg: &[u8]) -> Result<Option<String>, TelegramError> {
-        self.require_available()?;
-        self.require_authorized()?;
-        let candidate = crate::photo_match::Fingerprint::decode(jpeg).map_err(|_| {
-            TelegramError::message(
-                "telegram.photo_matching_decode_failed",
-                "Cannot decode the profile photo for matching.",
-            )
-        })?;
-        for photo in self.photo_history().await? {
-            if let Some(bytes) = self.history_photo(&photo.id).await? {
-                let fingerprint =
-                    crate::photo_match::Fingerprint::decode(&bytes).map_err(|_| {
-                        TelegramError::message(
-                            "telegram.photo_decode_failed",
-                            "Cannot decode Telegram's profile photo.",
-                        )
-                    })?;
-                if candidate.is_close(&fingerprint) {
-                    return Ok(Some(photo.id));
-                }
-            }
-        }
-        Ok(None)
-    }
-
     pub async fn use_history_photo(&mut self, id: &str) -> Result<bool, TelegramError> {
         self.require_available()?;
         self.require_authorized()?;
         let id = parse_photo_id(id)?;
-        for attempt in 0..2 {
+        if !self.history.contains_key(&id) {
             self.photo_history().await?;
+        }
+        for attempt in 0..2 {
             let Some(photo) = self.history.get(&id) else {
                 return Ok(false);
             };
@@ -635,7 +601,9 @@ impl Telegram {
                     self.refresh_after_mutation().await;
                     return Ok(true);
                 }
-                Err(error) if attempt == 0 && stale_photo_reference(&error) => continue,
+                Err(error) if attempt == 0 && stale_photo_reference(&error) => {
+                    self.photo_history().await?;
+                }
                 Err(InvocationError::Rpc(rpc)) if rpc.name == "PHOTO_ID_INVALID" => {
                     return Ok(false);
                 }
@@ -1522,21 +1490,7 @@ mod tests {
     async fn history_requires_authorization_and_preserves_connection_failures() {
         let (_dir, mut telegram) = offline_telegram().await;
         assert!(telegram.photo_history().await.unwrap_err().unauthorized);
-        assert!(
-            telegram
-                .has_history_photo("42")
-                .await
-                .unwrap_err()
-                .unauthorized
-        );
         assert!(telegram.history_photo("42").await.unwrap_err().unauthorized);
-        assert!(
-            telegram
-                .matching_photo(b"jpeg")
-                .await
-                .unwrap_err()
-                .unauthorized
-        );
         assert!(
             telegram
                 .use_history_photo("42")
@@ -1563,8 +1517,6 @@ mod tests {
                 dc_id: 1,
             },
         );
-        assert!(telegram.has_history_photo("42").await.unwrap());
-        assert!(telegram.has_history_photo("43").await.is_err());
         assert!(telegram.photo_history().await.is_err());
         assert!(telegram.history_photo("43").await.is_err());
         assert!(telegram.use_history_photo("42").await.is_err());
