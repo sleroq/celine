@@ -1,0 +1,10 @@
+/target
+/result
+/result-*
+/web/node_modules
+/web/dist
+*.session
+*.session.db
+.env
+.env.*
+!.env.example
