@@ -1,0 +1,947 @@
+@layer base {
+    :root {
+        scrollbar-gutter: stable;
+        font-family: system-ui, sans-serif;
+        color-scheme: light dark;
+        line-height: 1.5;
+    }
+    * {
+        box-sizing: border-box;
+    }
+    body {
+        color: var(--ui-foreground);
+        background: var(--ui-background);
+    }
+    main {
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+    }
+    header,
+    nav,
+    .profile,
+    .actions,
+    .emojis {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    header {
+        justify-content: space-between;
+    }
+    .actions,
+    .emojis {
+        flex-wrap: wrap;
+    }
+    h1 {
+        font-size: 1.5rem;
+    }
+}
+h1.saving {
+    color: transparent;
+    background: linear-gradient(
+        90deg,
+        var(--ui-foreground) 15%,
+        var(--ui-muted-foreground) 50%,
+        var(--ui-foreground) 85%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+}
+@media (prefers-reduced-motion: no-preference) {
+    h1.saving {
+        animation: saving-shimmer 0.8s linear infinite;
+    }
+}
+@keyframes saving-shimmer {
+    to {
+        background-position: -200% 0;
+    }
+}
+@media (forced-colors: active) {
+    h1.saving {
+        color: CanvasText;
+        background: none;
+    }
+}
+@layer base {
+    h2 {
+        font-size: 1.125rem;
+    }
+    h3 {
+        font-size: 1rem;
+    }
+    nav {
+        margin-block: 1rem;
+    }
+}
+.emoji-packs button[aria-pressed="true"] {
+    font-weight: 700;
+}
+.profile {
+    min-width: 0;
+    justify-content: end;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.profile-name {
+    overflow-wrap: anywhere;
+}
+.avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+.avatar-placeholder {
+    display: grid;
+    place-items: center;
+    color: CanvasText;
+    background: color-mix(in srgb, CanvasText 10%, Canvas);
+    font-weight: 600;
+}
+.account-menu {
+    position: relative;
+    min-width: 0;
+    max-width: 75%;
+    padding: 0.25rem;
+    border: 1px solid color-mix(in srgb, CanvasText 20%, Canvas);
+    border-radius: 0.625rem;
+    background: Canvas;
+}
+.account-menu-open {
+    z-index: 3;
+    width: min(17rem, calc(100vw - 2rem));
+    border-bottom-color: transparent;
+    border-end-start-radius: 0;
+    border-end-end-radius: 0;
+}
+.account-current,
+.account-list li {
+    display: flex;
+    align-items: center;
+}
+.account-menu-open .account-current {
+    border-radius: 0.375rem;
+    background: color-mix(in srgb, Highlight 12%, Canvas);
+}
+.account-trigger,
+.account-switch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.375rem;
+    flex: 1;
+    min-width: 0;
+    padding: 0.25rem 0.375rem;
+    text-align: start;
+    border: 0;
+    border-radius: 0.375rem;
+    color: CanvasText;
+    background: transparent;
+}
+.account-menu .profile {
+    justify-content: start;
+}
+.account-menu .profile-name {
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.account-menu .avatar {
+    width: 28px;
+    height: 28px;
+}
+.account-menu .profile-emoji,
+.account-menu .profile-emoji .emoji-media {
+    width: 22px;
+    height: 22px;
+}
+.account-logout svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.account-picker {
+    position: absolute;
+    inset-inline: -1px;
+    inset-block-start: calc(100% - 1px);
+    max-height: calc(100dvh - 8rem);
+    overflow-y: auto;
+    padding: 0 0.25rem 0.25rem;
+    border: 1px solid color-mix(in srgb, CanvasText 20%, Canvas);
+    border-block-start: 0;
+    border-radius: 0 0 0.625rem 0.625rem;
+    background: Canvas;
+}
+.account-list {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+.account-logout {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0.375rem;
+    color: CanvasText;
+    background: transparent;
+}
+.account-add {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    width: 100%;
+    margin-block-start: 0.25rem;
+    padding: 0.25rem 0.375rem;
+    text-align: start;
+    border: 0;
+    border-radius: 0.375rem;
+    color: CanvasText;
+    background: transparent;
+}
+@media (hover: hover) {
+    .account-trigger:hover,
+    .account-switch:hover,
+    .account-logout:hover,
+    .account-add:hover {
+        background: color-mix(in srgb, CanvasText 7%, Canvas);
+    }
+}
+.profile-emoji,
+.profile-emoji .emoji-media {
+    display: block;
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+}
+.text-color svg [fill]:not([fill="none"]) {
+    fill: currentColor;
+}
+.text-color svg [stroke]:not([stroke="none"]) {
+    stroke: currentColor;
+}
+.text-color img,
+.text-color video {
+    filter: brightness(0);
+}
+@media (prefers-color-scheme: dark) {
+    .text-color img,
+    .text-color video {
+        filter: brightness(0) invert(1);
+    }
+}
+@layer base {
+    section {
+        margin-block: 1.5rem;
+    }
+    form {
+        display: grid;
+        gap: 0.5rem;
+        margin-block: 1rem;
+    }
+    button,
+    input,
+    select {
+        font: inherit;
+        padding: 0.5rem 0.75rem;
+        min-height: 40px;
+    }
+    button {
+        cursor: pointer;
+    }
+    button:disabled {
+        cursor: default;
+    }
+    input,
+    select {
+        min-width: 0;
+    }
+    input:not([type="checkbox"]):not(.visually-hidden) {
+        width: 100%;
+    }
+    input[type="file"] {
+        padding-inline: 0;
+    }
+    input[type="checkbox"] {
+        min-height: auto;
+    }
+    form > button {
+        justify-self: start;
+    }
+}
+:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+}
+input[aria-invalid="true"] {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+}
+.jitter summary {
+    position: relative;
+    cursor: pointer;
+    padding-block: 0.375rem;
+}
+.jitter-help {
+    display: inline-grid;
+    place-items: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-inline-start: 0.375rem;
+    border: 1px solid GrayText;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    cursor: help;
+}
+.tooltip {
+    visibility: hidden;
+    position: absolute;
+    inset-inline-start: 0;
+    bottom: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid GrayText;
+    border-radius: 0.375rem;
+    background: Canvas;
+    color: CanvasText;
+    font-size: 0.875rem;
+    font-weight: 400;
+    text-wrap: pretty;
+    z-index: 1;
+}
+.jitter-tooltip {
+    width: min(20rem, 100%);
+}
+.jitter-help:hover .jitter-tooltip,
+.jitter summary:focus .jitter-tooltip {
+    visibility: visible;
+}
+.qr {
+    display: block;
+    width: 256px;
+    max-width: 100%;
+}
+.emoji-add,
+.photo-add {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border: 0;
+    border-radius: 0.5rem;
+    color: var(--ui-foreground);
+    background: var(--ui-surface);
+}
+.emoji-add[aria-expanded="true"] {
+    color: var(--ui-accent);
+    background: var(--ui-muted);
+}
+.photo-add {
+    width: 80px;
+    height: 80px;
+}
+.emoji-add svg,
+.photo-add svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+}
+.emoji-browser {
+    margin-block: 1rem;
+    width: 100%;
+    height: min(400px, 60dvh);
+    padding: 0.75rem;
+    grid-template-rows: auto minmax(0, 1fr);
+    border: 1px solid color-mix(in srgb, CanvasText 20%, Canvas);
+    border-radius: 0.75rem;
+    background: Canvas;
+}
+.emoji-browser:not([hidden]) {
+    display: grid;
+}
+.emoji-browser h3 {
+    margin-block: 0 0.5rem;
+    overflow-wrap: anywhere;
+}
+#emoji-pack-choices,
+.emoji-packs {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, CanvasText 30%, transparent) transparent;
+}
+#emoji-pack-choices {
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+}
+.emoji-packs {
+    overflow-x: auto;
+    padding: 0.25rem;
+    margin-block: 0 0.75rem;
+    margin-inline: -0.25rem;
+}
+.emoji-packs button {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 0.5rem;
+    color: CanvasText;
+    background: transparent;
+}
+.emoji-packs button[aria-pressed="true"] {
+    background: color-mix(in srgb, Highlight 12%, Canvas);
+    box-shadow: inset 0 -2px Highlight;
+}
+.pack-glyph {
+    width: 28px;
+    height: 28px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.pack-skeleton {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+}
+.emojis {
+    align-content: start;
+    padding: 0.25rem;
+    margin: 0;
+}
+.emoji-media {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    pointer-events: none;
+    vertical-align: middle;
+}
+.emoji-art {
+    position: absolute;
+    inset: 0;
+}
+.emoji-art-loading {
+    visibility: hidden;
+}
+.emoji-art > img,
+.emoji-art > video,
+.emoji-art > svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.emoji-skeleton,
+.photo-skeleton,
+.qr-skeleton {
+    display: block;
+    background: color-mix(in srgb, CanvasText 12%, Canvas);
+}
+.qr-skeleton {
+    width: min(256px, 100%);
+    aspect-ratio: 1;
+    border-radius: 0.5rem;
+}
+.emoji-skeleton {
+    width: 32px;
+    height: 32px;
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 35%;
+}
+@media (prefers-reduced-motion: no-preference) {
+    .emoji-skeleton,
+    .photo-skeleton,
+    .qr-skeleton {
+        animation: emoji-pulse 1.2s ease-in-out infinite;
+    }
+}
+@keyframes emoji-pulse {
+    50% {
+        opacity: 0.4;
+    }
+}
+.emoji-choice {
+    position: relative;
+    cursor: pointer;
+}
+.emoji-choice input,
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+.emoji-preview {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 2px solid transparent;
+    border-radius: 0.5rem;
+}
+.emoji-choice input:checked + .emoji-preview {
+    border-color: Highlight;
+    background: color-mix(in srgb, Highlight 12%, Canvas);
+}
+.emoji-choice input:checked + .emoji-preview::after {
+    content: "✓";
+    position: absolute;
+    inset-block-end: -2px;
+    inset-inline-end: -2px;
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    color: HighlightText;
+    background: Highlight;
+    font-size: 11px;
+    line-height: 1;
+}
+.emoji-choice input:focus-visible + .emoji-preview {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+}
+.emoji-choice input:disabled + .emoji-preview {
+    opacity: 0.5;
+}
+.sortable-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0;
+    margin-block: 1rem;
+    list-style: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.sortable-item {
+    position: relative;
+}
+.photo-current {
+    position: absolute;
+    inset-inline: 2px;
+    inset-block-end: 2px;
+    padding: 0.125rem;
+    border-radius: 0 0 0.375rem 0.375rem;
+    color: white;
+    background: #222d;
+    font-size: 0.625rem;
+    line-height: 1.2;
+    text-align: center;
+    pointer-events: none;
+}
+.photo-tooltip {
+    inset-inline-start: auto;
+    inset-inline-end: 3px;
+    bottom: 25px;
+    width: max-content;
+    max-width: min(20rem, calc(100vw - 2rem));
+    text-align: start;
+    pointer-events: none;
+    transition: visibility 0s 0s;
+}
+.sortable-handle:has(.photo-badge:hover) ~ .photo-tooltip,
+.sortable-handle:focus-visible ~ .photo-tooltip {
+    visibility: visible;
+    transition-delay: 200ms;
+}
+.sortable-item:has(.photo-badge:hover, .sortable-handle:focus-visible) {
+    z-index: 1;
+}
+.sortable-handle {
+    display: grid;
+    place-items: center;
+    width: 80px;
+    height: 80px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0.5rem;
+    background: var(--ui-surface);
+    cursor: grab;
+    touch-action: none;
+}
+.sortable-list-emoji .sortable-handle {
+    width: 48px;
+    height: 48px;
+}
+.sortable-handle:active {
+    cursor: grabbing;
+}
+.sortable-handle[aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+}
+.sortable-handle[aria-disabled="true"] {
+    cursor: default;
+}
+.sortable-handle img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.sortable-list-emoji .sortable-handle img {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+}
+.sortable-fallback,
+.emoji-fallback {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.sortable-ghost {
+    opacity: 0.35;
+}
+.sortable-remove {
+    position: absolute;
+    inset-block-start: -4px;
+    inset-inline-end: -4px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    min-height: 0;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, CanvasText 25%, Canvas);
+    border-radius: 50%;
+    color: CanvasText;
+    background: Canvas;
+    opacity: 0;
+    pointer-events: none;
+}
+.sortable-remove svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+}
+.sortable-item:focus-within .sortable-remove {
+    opacity: 1;
+    pointer-events: auto;
+}
+@media (hover: hover) {
+    .sortable-item:hover .sortable-remove {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+@media (hover: none) {
+    .sortable-remove {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+.hint {
+    font-size: 0.875rem;
+}
+[role="alert"] {
+    font-weight: 600;
+}
+[role="status"],
+input[type="number"] {
+    font-variant-numeric: tabular-nums;
+}
+.notifications {
+    position: fixed;
+    z-index: 10;
+    inset-block-end: 1rem;
+    inset-inline-end: 1rem;
+    display: grid;
+    gap: 0.5rem;
+    width: min(24rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    pointer-events: none;
+}
+.notification {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid color-mix(in srgb, CanvasText 20%, Canvas);
+    border-radius: 0.625rem;
+    background: Canvas;
+    box-shadow: 0 4px 20px color-mix(in srgb, CanvasText 12%, transparent);
+    pointer-events: auto;
+}
+.notification span {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.notification button {
+    flex-shrink: 0;
+}
+.notification-dismiss {
+    padding: 0;
+    width: 40px;
+    border: 0;
+    border-radius: 0.375rem;
+    color: CanvasText;
+    background: transparent;
+    font-size: 1.25rem;
+}
+@media (hover: hover) {
+    .notification-dismiss:hover {
+        background: color-mix(in srgb, CanvasText 7%, Canvas);
+    }
+}
+.photo-drop-active {
+    outline: 2px dashed Highlight;
+    outline-offset: 0.5rem;
+}
+.photo-browser {
+    margin-block: 0.5rem 1rem;
+}
+.photo-browser summary {
+    cursor: pointer;
+    padding-block: 0.375rem;
+}
+.photo-history {
+    max-height: min(360px, 50dvh);
+    overflow-y: auto;
+    padding: 0.25rem;
+}
+.photo-choices {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 0.75rem;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.photo-skeleton {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 0.5rem;
+}
+.photo-choice {
+    position: relative;
+    display: block;
+    cursor: pointer;
+}
+.photo-choice .photo-skeleton {
+    position: absolute;
+    inset: 0;
+}
+.photo-choice img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 0.5rem;
+    outline: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+    outline-offset: -1px;
+    -webkit-user-drag: none;
+}
+.photo-choice img.photo-loading {
+    visibility: hidden;
+}
+.photo-choice-pin {
+    position: absolute;
+    z-index: 1;
+    inset-block-start: 0.125rem;
+    inset-inline-start: 0.125rem;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    color: black;
+    pointer-events: none;
+}
+.photo-choice-pin svg {
+    width: 20px;
+    height: 20px;
+}
+.photo-choice:has(input:checked) img {
+    outline: 3px solid Highlight;
+    outline-offset: -3px;
+}
+.photo-choice:has(input:focus-visible) {
+    outline: 2px solid Highlight;
+    outline-offset: 3px;
+    border-radius: 0.5rem;
+}
+.photo-choice:has(input:disabled) {
+    cursor: default;
+}
+.photo-badge {
+    position: absolute;
+    inset-block-end: 3px;
+    inset-inline-end: 3px;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+    border-radius: 0.25rem;
+    background: color-mix(in srgb, Canvas 65%, transparent);
+    color: CanvasText;
+}
+.photo-badge svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.sortable-edit {
+    position: absolute;
+    inset-block-end: -4px;
+    inset-inline-start: -4px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    min-height: 0;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, CanvasText 25%, Canvas);
+    border-radius: 50%;
+    color: CanvasText;
+    background: Canvas;
+    opacity: 0;
+    pointer-events: none;
+}
+.sortable-edit svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+@media (prefers-reduced-motion: no-preference) {
+    .sortable-list-photo .sortable-remove,
+    .sortable-list-photo .sortable-edit {
+        transition: opacity 150ms ease;
+    }
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .sortable-handle,
+    .photo-choice,
+    .emoji-choice {
+        transform: perspective(220px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+        transition: transform 150ms ease;
+    }
+}
+.sortable-item:focus-within .sortable-edit {
+    opacity: 1;
+    pointer-events: auto;
+}
+@media (hover: hover) {
+    .sortable-item:hover .sortable-edit {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+@media (hover: none) {
+    .sortable-edit {
+        opacity: 1;
+        pointer-events: auto;
+        width: 44px;
+        height: 44px;
+    }
+}
+.crop-dialog {
+    width: min(36rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow: auto;
+    padding: 1.25rem;
+    border: 1px solid GrayText;
+    border-radius: 0.75rem;
+    color: CanvasText;
+    background: Canvas;
+}
+.crop-dialog::backdrop {
+    background: rgb(0 0 0 / 0.65);
+}
+.crop-stage {
+    position: relative;
+    height: min(55dvh, 480px);
+    min-height: 180px;
+    overflow: hidden;
+    background: #222;
+}
+.crop-stage img {
+    display: block;
+    max-width: 100%;
+}
+.photo-preview {
+    display: grid;
+    place-items: center;
+}
+.photo-preview-crop {
+    position: relative;
+    width: min(100%, 55dvh, 480px);
+    aspect-ratio: 1;
+    overflow: hidden;
+}
+.photo-preview .photo-preview-crop img {
+    position: absolute;
+    max-width: none;
+}
+.photo-dialog-skeleton {
+    position: absolute;
+    inset: 0;
+    display: block;
+    background: color-mix(in srgb, CanvasText 12%, Canvas);
+}
+@media (prefers-reduced-motion: no-preference) {
+    .photo-dialog-skeleton {
+        animation: emoji-pulse 1.2s ease-in-out infinite;
+    }
+}
+.crop-stage .cropper-view-box {
+    border-radius: 50%;
+    outline: 2px solid white;
+    outline-offset: -2px;
+}
+.crop-actions {
+    justify-content: end;
+    margin-block-start: 1rem;
+}
+.crop-actions button:first-child:nth-last-child(3) {
+    margin-inline-end: auto;
+}

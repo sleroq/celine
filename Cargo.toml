@@ -1,7 +1,31 @@
 [package]
 name = "celine"
 version = "0.1.0"
+license = "WTFPL"
 edition = "2024"
 rust-version = "1.99"
 
 [dependencies]
+anyhow = "1"
+base64 = "0.22"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+axum = { version = "0.8", features = ["multipart"] }
+directories = "6"
+grammers-client = "=0.11.0"
+grammers-mtsender = "=0.11.0"
+grammers-session = "=0.11.0"
+grammers-tl-types = "=0.11.0"
+fs2 = "0.4"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+include_dir = "0.7"
+mime_guess = "2"
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net", "fs"] }
+uuid = { version = "1", features = ["v4"] }
+tower = { version = "0.5", features = ["util"] }
+
+[dev-dependencies]
+http-body-util = "0.1"

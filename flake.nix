@@ -43,17 +43,7 @@
             rustc = rust;
           };
         in
-        rustPlatform.buildRustPackage {
-          pname = "celine";
-          version = "0.1.0";
-          src = pkgs.lib.cleanSource ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-          meta = {
-            description = "Telegram profile companion";
-            mainProgram = "celine";
-            platforms = pkgs.lib.platforms.unix;
-          };
-        };
+        pkgs.callPackage ./nix/package.nix { inherit rustPlatform; };
     in
     {
       packages = forAllSystems (

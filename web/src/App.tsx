@@ -1,0 +1,1286 @@
+import { createEffect, createSignal, For, onCleanup, onSettled, Show, untrack } from "solid-js";
+import { accountApi, reconcilePhotoOrder, RequestError, request, timeRemaining } from "./api";
+import type { AccountApi, EmojiChoice, Settings, State } from "./api";
+import { AccountMenu, Login, type Actions } from "./Accounts";
+import { Duration } from "./duration";
+import { createAutosave } from "./autosave";
+import { createEmojiPacks } from "./emoji-packs";
+import { EmojiMedia } from "./EmojiMedia";
+import { PhotoDialog } from "./PhotoDialog";
+import { SortableList } from "./SortableList";
+import { serverMessage, t } from "./i18n";
+import { Notifications } from "./notifications";
+import { createNotifications } from "./notification-center";
+import { resetTilt, tilt } from "./tilt";
+import { Button, Input, Label } from "./components/ui";
+
+type AccountActions = Actions & { api: AccountApi };
+type Notify = (message: string, action?: () => void) => void;
+type SaveStatusValue = "idle" | "pending" | "saved" | "error";
+type SaveKey = "photos" | "emojis" | "photoSettings" | "emojiSettings";
+type ReportSave = (
+    key: SaveKey,
+    status: SaveStatusValue,
+    valid: boolean,
+    retry: () => void,
+) => void;
+function saveLabel(key: SaveKey) {
+    const labels = {
+        photos: "profilePhotos",
+        emojis: "emojiStatus",
+        photoSettings: "photoRotation",
+        emojiSettings: "emojiRotation",
+    } as const;
+    return t(labels[key]);
+}
+
+export default function App() {
+    const [state, setState] = createSignal<State>();
+    const [now, setNow] = createSignal(Date.now() / 1000);
+    const [operation, setOperation] = createSignal<"mutation" | "reorder">();
+    const [connectionError, setConnectionError] = createSignal("");
+    const [notice, setNotice] = createSignal("");
+    const notifications = createNotifications();
+    const [saves, setSaves] = createSignal<
+        Partial<Record<SaveKey, { status: SaveStatusValue; valid: boolean; retry: () => void }>>
+    >({});
+    const unsaved = () =>
+        Object.values(saves()).some((save) => save.status === "pending" || save.status === "error");
+    const saving = () => Object.values(saves()).some((save) => save.status === "pending");
+    const failed = () => {
+        const keys: SaveKey[] = ["photos", "emojis", "photoSettings", "emojiSettings"];
+        return keys.flatMap((key) => {
+            const save = saves()[key];
+            return save?.status === "error" && save.valid ? [{ key, save }] : [];
+        });
+    };
+    const saveNotifications: Partial<Record<SaveKey, number>> = {};
+    function reportSave(key: SaveKey, status: SaveStatusValue, valid: boolean, retry: () => void) {
+        const previous = saves()[key];
+        setSaves((current) => ({ ...current, [key]: { status, valid, retry } }));
+        if (!valid && previous?.valid !== false) {
+            notifications.push(t("invalidSettingsContext", { context: saveLabel(key) }));
+        }
+        if (status !== "error" || !valid) {
+            const id = saveNotifications[key];
+            if (id != null) notifications.dismiss(id);
+            delete saveNotifications[key];
+        } else if (previous?.status !== "error" || !previous.valid) {
+            /* oxlint-disable solid/reactivity -- notifications.push stores this callback for the retry button; reactive values are read when clicked. */
+            saveNotifications[key] = notifications.push(
+                t("saveFailedContext", { context: saveLabel(key) }),
+                () => {
+                    const save = saves()[key];
+                    if (save?.status === "error" && save.valid) save.retry();
+                },
+            );
+            /* oxlint-enable solid/reactivity */
+        }
+    }
+    let pending: Promise<void> | undefined;
+    let timer: ReturnType<typeof setTimeout>;
+    let clock: ReturnType<typeof setInterval>;
+    let stopped = false;
+
+    function backgroundError() {
+        const data = state();
+        if (!data?.last_error) return "";
+        return serverMessage(data.last_error_info, data.last_error);
+    }
+
+    function load() {
+        pending ??= request("state")
+            .then((data) => {
+                if (state() && data.active_account_id !== state()?.active_account_id && unsaved())
+                    return;
+                if (data.active_account_id !== state()?.active_account_id) {
+                    setNotice("");
+                }
+                setState(data);
+                setConnectionError("");
+            })
+            .catch((failure) => {
+                setConnectionError(t("cannotReachCeline"));
+                throw failure;
+            })
+            .finally(() => {
+                pending = undefined;
+            });
+        return pending;
+    }
+
+    async function refresh() {
+        await pending?.catch(() => {});
+        await load();
+    }
+
+    async function poll() {
+        if (!operation()) await load().catch(() => {});
+        if (!stopped) timer = setTimeout(poll, 2000);
+    }
+
+    async function perform(work: () => Promise<void>, message = "", activity?: "reorder") {
+        // Reordering leaves settings editable, but mutations still share one lock.
+        if (operation()) return;
+        setOperation(activity ?? "mutation");
+        setNotice("");
+        let failure: unknown;
+        try {
+            await pending?.catch(() => {});
+            await work();
+        } catch (error) {
+            failure = error;
+        }
+        try {
+            await refresh();
+        } catch (error) {
+            failure ??= error;
+        }
+        if (failure)
+            notifications.push(
+                failure instanceof RequestError ? failure.message : t("requestFailed"),
+            );
+        else setNotice(message);
+        setOperation(undefined);
+    }
+
+    createEffect(connectionError, (message, previous) => {
+        if (message && message !== previous) notifications.push(message);
+    });
+    createEffect(
+        () => [state()?.active_account_id, backgroundError()] as const,
+        ([, message], previous) => {
+            if (
+                message &&
+                (message !== previous?.[1] || state()?.active_account_id !== previous?.[0])
+            )
+                notifications.push(message);
+        },
+    );
+
+    onSettled(() => {
+        void poll();
+        clock = setInterval(() => setNow(Date.now() / 1000), 1000);
+    });
+    onCleanup(() => {
+        stopped = true;
+        clearTimeout(timer);
+        clearInterval(clock);
+    });
+
+    return (
+        <main class="my-5! bg-background text-foreground sm:my-10!">
+            <header class="flex items-center justify-between gap-4">
+                <h1
+                    class={{
+                        "m-0! text-[1.375rem]! font-bold tracking-tight": true,
+                        saving: saving(),
+                    }}
+                >
+                    Celine
+                </h1>
+                <Show when={state()}>
+                    {(data) => (
+                        <AccountMenu
+                            accounts={data().accounts}
+                            activeId={data().active_account_id}
+                            now={now()}
+                            busy={!!operation() || unsaved()}
+                            unsaved={unsaved()}
+                            perform={perform}
+                        />
+                    )}
+                </Show>
+            </header>
+            <div class="visually-hidden" role="status" aria-live="polite">
+                {saving() ? t("savingChanges") : ""}
+            </div>
+            <Show when={failed().length}>
+                <div class="mt-4 flex flex-wrap gap-2">
+                    <For each={failed()}>
+                        {({ key, save }) => (
+                            <Button variant="secondary" size="sm" onClick={() => save.retry()}>
+                                {t("retrySaveContext", { context: saveLabel(key) })}
+                            </Button>
+                        )}
+                    </For>
+                </div>
+            </Show>
+            <Notifications center={notifications} />
+            <Show when={notice()}>
+                <p role="status">{notice()}</p>
+            </Show>
+            <Show when={state()} fallback={<p role="status">{t("connecting")}</p>}>
+                {(data) => (
+                    <Show when={data().active_account_id} keyed>
+                        {(id) => (
+                            <AccountWorkspace
+                                api={accountApi(id)}
+                                notify={notifications.push}
+                                state={data()}
+                                now={now()}
+                                busy={!!operation()}
+                                reordering={operation() === "reorder"}
+                                perform={perform}
+                                refresh={refresh}
+                                reportSave={reportSave}
+                            />
+                        )}
+                    </Show>
+                )}
+            </Show>
+        </main>
+    );
+}
+
+function AccountWorkspace(
+    props: AccountActions & {
+        notify: Notify;
+        state: State;
+        now: number;
+        reordering: boolean;
+        refresh: () => Promise<void>;
+        reportSave: ReportSave;
+    },
+) {
+    const [selectedTab, setTab] = createSignal<"photos" | "emojis">("photos");
+    const premium = () => (props.state.profile?.premium ?? props.state.auth.premium) === true;
+    const tab = () => (premium() ? selectedTab() : "photos");
+    const photoOrder = createAutosave<string[]>(
+        (ids) =>
+            props.api.request("photos/order", "POST", {
+                ids: reconcilePhotoOrder(
+                    ids,
+                    props.state.photos.map((photo) => photo.id),
+                ),
+            }),
+        () => props.refresh(),
+    );
+    onCleanup(photoOrder.dispose);
+    createEffect(photoOrder.status, (status) =>
+        props.reportSave("photos", status, true, () => void photoOrder.retry().catch(() => {})),
+    );
+    onCleanup(() => props.reportSave("photos", "idle", true, () => {}));
+    createEffect(
+        () => [photoOrder.status(), photoOrder.draft(), props.state.photos] as const,
+        ([status, draft, photos]) => {
+            const ids = photos.map((photo) => photo.id);
+            if (
+                status === "saved" &&
+                draft &&
+                JSON.stringify(reconcilePhotoOrder(draft, ids)) === JSON.stringify(ids)
+            )
+                photoOrder.acknowledge();
+        },
+    );
+    const emojis = createAutosave<string[]>(
+        (ids) => props.api.request("emojis", "PUT", { ids }),
+        () => props.refresh(),
+    );
+    onCleanup(emojis.dispose);
+    createEffect(emojis.status, (status) =>
+        props.reportSave("emojis", status, true, () => void emojis.retry().catch(() => {})),
+    );
+    onCleanup(() => props.reportSave("emojis", "idle", true, () => {}));
+    createEffect(
+        () => [emojis.status(), emojis.draft(), props.state.selected_emoji_ids] as const,
+        ([status, draft, selected]) => {
+            if (status === "saved" && draft && JSON.stringify(draft) === JSON.stringify(selected))
+                emojis.acknowledge();
+        },
+    );
+
+    return (
+        <Show
+            when={props.state.auth.status === "authorized"}
+            fallback={
+                <Login
+                    api={props.api}
+                    auth={props.state.auth}
+                    now={props.now}
+                    busy={props.busy}
+                    perform={props.perform}
+                />
+            }
+        >
+            <nav
+                class="mt-6! mb-0! inline-flex! gap-1! rounded-xl bg-muted p-1"
+                aria-label={t("rotationSettings")}
+            >
+                <button
+                    type="button"
+                    class={[
+                        "min-h-10 rounded-lg border-0! px-4! text-sm font-semibold motion-safe:transition-[color,background-color,box-shadow,scale] motion-safe:duration-200 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                        tab() === "photos"
+                            ? "bg-surface text-foreground shadow-sm"
+                            : "bg-transparent text-muted-foreground hover:text-foreground",
+                    ]}
+                    aria-pressed={tab() === "photos" ? "true" : "false"}
+                    aria-controls="photos-panel"
+                    onClick={() => setTab("photos")}
+                >
+                    {t("profilePhotos")}
+                </button>
+                <button
+                    type="button"
+                    class={[
+                        "min-h-10 rounded-lg border-0! px-4! text-sm font-semibold motion-safe:transition-[color,background-color,box-shadow,scale] motion-safe:duration-200 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                        tab() === "emojis"
+                            ? "bg-surface text-foreground shadow-sm"
+                            : "bg-transparent text-muted-foreground hover:text-foreground",
+                    ]}
+                    aria-pressed={tab() === "emojis" ? "true" : "false"}
+                    aria-controls="emojis-panel"
+                    onClick={() => setTab("emojis")}
+                >
+                    {t("emojiStatus")}
+                </button>
+            </nav>
+            <div class="relative">
+                <div
+                    id="photos-panel"
+                    inert={tab() !== "photos"}
+                    aria-hidden={tab() !== "photos" ? "true" : undefined}
+                    class={[
+                        "motion-safe:transition-[opacity,translate] motion-safe:duration-200 motion-safe:ease-out",
+                        tab() === "photos"
+                            ? "relative opacity-100 translate-y-0"
+                            : "pointer-events-none invisible absolute inset-x-0 top-0 opacity-0 -translate-y-2",
+                    ]}
+                >
+                    <Photos
+                        api={props.api}
+                        notify={props.notify}
+                        photos={props.state.photos}
+                        currentPhotoId={
+                            props.state.applied_settings ? props.state.current_photo_id : null
+                        }
+                        busy={props.busy}
+                        perform={props.perform}
+                        refresh={props.refresh}
+                        autosave={photoOrder}
+                    />
+                    <Rotation
+                        api={props.api}
+                        target="photo"
+                        settings={props.state.settings}
+                        count={props.state.photos.length}
+                        next={props.state.next_rotation_at}
+                        now={props.now}
+                        busy={props.busy && !props.reordering}
+                        locked={props.busy}
+                        perform={props.perform}
+                        refresh={props.refresh}
+                        applied={props.state.applied_settings}
+                        beforeAction={photoOrder.flush}
+                        reportSave={props.reportSave}
+                    />
+                </div>
+                <div
+                    id="emojis-panel"
+                    inert={tab() !== "emojis"}
+                    aria-hidden={tab() !== "emojis" ? "true" : undefined}
+                    class={[
+                        "motion-safe:transition-[opacity,translate] motion-safe:duration-200 motion-safe:ease-out",
+                        tab() === "emojis"
+                            ? "relative opacity-100 translate-y-0"
+                            : "pointer-events-none invisible absolute inset-x-0 top-0 opacity-0 translate-y-2",
+                    ]}
+                >
+                    <EmojiPicker
+                        api={props.api}
+                        notify={props.notify}
+                        selected={props.state.selected_emoji_ids}
+                        selectedEmojis={props.state.selected_emojis}
+                        premium={premium()}
+                        busy={props.busy}
+                        perform={props.perform}
+                        autosave={emojis}
+                    />
+                    <Show when={premium()}>
+                        <Rotation
+                            api={props.api}
+                            target="emoji"
+                            settings={props.state.emoji_settings}
+                            count={(emojis.draft() ?? props.state.selected_emoji_ids).length}
+                            next={props.state.next_emoji_rotation_at}
+                            now={props.now}
+                            busy={props.busy && !props.reordering}
+                            locked={props.busy}
+                            perform={props.perform}
+                            refresh={props.refresh}
+                            applied={props.state.applied_emoji_settings}
+                            beforeAction={emojis.flush}
+                            reportSave={props.reportSave}
+                        />
+                    </Show>
+                </div>
+            </div>
+        </Show>
+    );
+}
+
+function Photos(
+    props: AccountActions & {
+        notify: Notify;
+        photos: State["photos"];
+        currentPhotoId: string | null;
+        refresh: () => Promise<void>;
+        autosave: ReturnType<typeof createAutosave<string[]>>;
+    },
+) {
+    const photos = () => {
+        const ids = props.autosave.draft();
+        if (!ids) return props.photos;
+        const byId = new Map(props.photos.map((photo) => [photo.id, photo]));
+        return reconcilePhotoOrder(
+            ids,
+            props.photos.map((photo) => photo.id),
+        ).map((id) => byId.get(id)!);
+    };
+    let input!: HTMLInputElement;
+    // Only the initial empty library opens the picker; later updates preserve the user’s choice.
+    const [pickerOpen, setPickerOpen] = createSignal(untrack(() => props.photos.length === 0));
+    const [draggingFiles, setDraggingFiles] = createSignal(false);
+    const [history, setHistory] = createSignal<{ id: string }[]>([]);
+    const [loading, setLoading] = createSignal(true);
+    const [historyError, setHistoryError] = createSignal("");
+    const [selecting, setSelecting] = createSignal(false);
+    const [uploading, setUploading] = createSignal(false);
+    const [photoDialog, setPhotoDialog] = createSignal<{
+        photo: State["photos"][number];
+        edit: boolean;
+    }>();
+    let editButton: HTMLButtonElement | undefined;
+    let historyRequest = 0;
+    let pickerSummary!: HTMLElement;
+
+    async function loadHistory() {
+        const requestId = ++historyRequest;
+        setLoading(true);
+        setHistoryError("");
+        try {
+            const data = await props.api.request("photos/history");
+            if (requestId === historyRequest) setHistory(data.photos);
+        } catch (failure) {
+            if (requestId === historyRequest) {
+                const message =
+                    failure instanceof RequestError ? failure.message : t("cannotLoadPhotos");
+                setHistoryError(message);
+                props.notify(message, () => void loadHistory());
+            }
+        } finally {
+            if (requestId === historyRequest) setLoading(false);
+        }
+    }
+
+    createEffect(pickerOpen, (open) => {
+        if (open) void loadHistory();
+        else historyRequest++;
+    });
+    onCleanup(() => {
+        historyRequest++;
+    });
+
+    function closePicker() {
+        setPickerOpen(false);
+        pickerSummary.focus();
+    }
+
+    async function togglePhoto(id: string) {
+        if (props.busy || selecting()) return;
+        const selected = props.photos.find((photo) => photo.telegram_id === id);
+        setSelecting(true);
+        try {
+            // oxlint-disable-next-line solid/reactivity -- perform invokes this callback when the action runs; it is not a reactive computation.
+            await props.perform(async () => {
+                await props.autosave.flush();
+                await (selected
+                    ? props.api.request(`photos/${encodeURIComponent(selected.id)}`, "DELETE")
+                    : props.api.request("photos/history", "POST", { id }));
+            });
+        } finally {
+            setSelecting(false);
+        }
+    }
+
+    async function upload(files: File[]) {
+        if (!files.length || props.busy) return;
+        setUploading(true);
+        try {
+            // oxlint-disable-next-line solid/reactivity -- perform invokes this callback when the action runs; it is not a reactive computation.
+            await props.perform(async () => {
+                await props.autosave.flush();
+                for (const file of files) {
+                    const form = new FormData();
+                    form.append("file", file);
+                    await props.api.request("photos", "POST", form);
+                }
+            });
+        } finally {
+            setUploading(false);
+        }
+    }
+
+    function reorder(ids: string[]) {
+        props.autosave.edit(ids);
+    }
+
+    function remove(id: string) {
+        // oxlint-disable-next-line solid/reactivity -- perform invokes this callback when the action runs; it is not a reactive computation.
+        void props.perform(async () => {
+            await props.autosave.flush();
+            await props.api.request(`photos/${encodeURIComponent(id)}`, "DELETE");
+        });
+    }
+
+    return (
+        <section
+            aria-label={t("profilePhotos")}
+            class={{ "photo-drop-active": draggingFiles() }}
+            onDragOver={(event) => {
+                if (!event.dataTransfer?.types.includes("Files")) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = props.busy ? "none" : "copy";
+                setDraggingFiles(!props.busy);
+            }}
+            onDragLeave={(event) => {
+                if (
+                    !(event.relatedTarget instanceof Node) ||
+                    !event.currentTarget.contains(event.relatedTarget)
+                )
+                    setDraggingFiles(false);
+            }}
+            onDrop={(event) => {
+                if (!event.dataTransfer?.types.includes("Files")) return;
+                event.preventDefault();
+                setDraggingFiles(false);
+                void upload(Array.from(event.dataTransfer.files));
+            }}
+        >
+            <input
+                type="file"
+                accept="image/jpeg,image/png"
+                multiple
+                disabled={props.busy}
+                class="visually-hidden"
+                aria-label={t("uploadPhotos")}
+                tabindex="-1"
+                ref={(element) => {
+                    input = element;
+                }}
+                onChange={(event) => {
+                    if (event.currentTarget.files)
+                        void upload(Array.from(event.currentTarget.files));
+                    event.currentTarget.value = "";
+                }}
+            />
+            <p class="hint">{t("photoUploadHint")}</p>
+            <Show when={uploading()}>
+                <p role="status">{t("checkingPhotoHistory")}</p>
+            </Show>
+            <SortableList
+                kind="photo"
+                busy={props.busy}
+                reorder={reorder}
+                items={photos().map((photo) => ({
+                    id: photo.id,
+                    label: photo.generated_name ? t("telegramPhotoName") : photo.name,
+                    imageUrl: props.api.selectedPhotoUrl(photo),
+                    reorderLabel: photo.generated_name ? t("reorderTelegramPhoto") : undefined,
+                    removeLabel: photo.generated_name ? t("removeTelegramPhoto") : undefined,
+                    badge: photo.telegram_id == null ? t("photoNotLinked") : undefined,
+                    current: photo.id === props.currentPhotoId,
+                }))}
+                edit={(id, button) => {
+                    editButton = button;
+                    setPhotoDialog({
+                        photo: props.photos.find((photo) => photo.id === id)!,
+                        edit: true,
+                    });
+                }}
+                preview={(id, button) => {
+                    editButton = button;
+                    setPhotoDialog({
+                        photo: props.photos.find((photo) => photo.id === id)!,
+                        edit: false,
+                    });
+                }}
+                remove={remove}
+                trailing={
+                    <button
+                        type="button"
+                        class="photo-add"
+                        disabled={props.busy}
+                        aria-label={t("uploadPhotos")}
+                        title={t("uploadPhotos")}
+                        onClick={() => input.click()}
+                    >
+                        <svg aria-hidden="true" viewBox="0 0 24 24">
+                            <path d="M12 5v14M5 12h14" />
+                        </svg>
+                    </button>
+                }
+            />
+            <Show when={photoDialog()} keyed>
+                {(dialog) => (
+                    <PhotoDialog
+                        api={props.api}
+                        photo={dialog.photo}
+                        edit={dialog.edit}
+                        refresh={props.refresh}
+                        close={() => {
+                            setPhotoDialog(undefined);
+                            queueMicrotask(() => editButton?.focus());
+                        }}
+                    />
+                )}
+            </Show>
+            <details
+                id="photo-browser"
+                class="photo-browser"
+                open={pickerOpen()}
+                onToggle={(event) => {
+                    const open = event.currentTarget.open;
+                    if (open && !pickerOpen()) setLoading(true);
+                    setPickerOpen(open);
+                }}
+                onKeyDown={(event) => {
+                    if (event.key === "Escape" && pickerOpen()) {
+                        event.preventDefault();
+                        closePicker();
+                    }
+                }}
+            >
+                <summary
+                    ref={(element) => {
+                        pickerSummary = element;
+                    }}
+                >
+                    {t("selectExistingPhotos")}
+                </summary>
+                <div
+                    class="photo-history"
+                    role="region"
+                    aria-label={t("telegramProfilePhotos")}
+                    aria-busy={loading() ? "true" : "false"}
+                >
+                    <Show when={loading()}>
+                        <p class="visually-hidden" role="status">
+                            {t("loadingPhotos")}
+                        </p>
+                        <div class="photo-choices" aria-hidden="true">
+                            <For each={[0, 1, 2, 3, 4, 5]}>
+                                {() => <span class="photo-skeleton" />}
+                            </For>
+                        </div>
+                    </Show>
+                    <Show when={historyError()}>
+                        <button type="button" onClick={() => void loadHistory()}>
+                            {t("retry")}
+                        </button>
+                    </Show>
+                    <Show when={!loading() && !historyError()}>
+                        <Show
+                            when={history().length}
+                            fallback={<p class="hint">{t("noTelegramPhotos")}</p>}
+                        >
+                            <div class="photo-choices">
+                                <For each={history()}>
+                                    {(photo, index) => (
+                                        <PhotoChoice
+                                            url={props.api.photoHistoryUrl(photo.id)}
+                                            label={t("includeTelegramPhoto", {
+                                                number: index() + 1,
+                                            })}
+                                            checked={props.photos.some(
+                                                (item) => item.telegram_id === photo.id,
+                                            )}
+                                            disabled={props.busy || selecting()}
+                                            toggle={() => void togglePhoto(photo.id)}
+                                        />
+                                    )}
+                                </For>
+                            </div>
+                        </Show>
+                    </Show>
+                </div>
+                <p class="hint">{t("photoSelectionHint")}</p>
+            </details>
+        </section>
+    );
+}
+
+function PhotoChoice(props: {
+    url: string;
+    label: string;
+    checked: boolean;
+    disabled: boolean;
+    toggle: () => void;
+}) {
+    const [loading, setLoading] = createSignal(true);
+
+    return (
+        <label
+            class="photo-choice"
+            onPointerMove={tilt}
+            onPointerLeave={resetTilt}
+            onPointerCancel={resetTilt}
+        >
+            <input
+                class="visually-hidden"
+                type="checkbox"
+                aria-label={props.label}
+                checked={props.checked}
+                disabled={props.disabled}
+                onChange={(event) => {
+                    event.currentTarget.checked = props.checked;
+                    props.toggle();
+                }}
+            />
+            <Show when={props.checked}>
+                <span class="photo-choice-pin" aria-hidden="true">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M12 13v9M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5Z" />
+                    </svg>
+                </span>
+            </Show>
+            <Show when={loading()}>
+                <span class="photo-skeleton" aria-hidden="true" />
+            </Show>
+            <img
+                class={{ "photo-loading": loading() }}
+                src={props.url}
+                alt=""
+                loading="lazy"
+                draggable="false"
+                onLoad={() => setLoading(false)}
+                onError={() => setLoading(false)}
+            />
+        </label>
+    );
+}
+
+function DurationField(props: {
+    id: string;
+    label: string;
+    seconds: number;
+    minimum: number;
+    maximum?: number;
+    disabled: boolean;
+    change: (seconds: number) => void;
+    invalid?: () => void;
+    isInvalid?: boolean;
+    errorId?: string;
+}) {
+    // Choose the initial display unit once; edits and server refreshes must not reset it.
+    const [unit, setUnit] = createSignal(untrack(() => Duration.unitFor(props.seconds)));
+
+    return (
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Label class="min-w-20 text-foreground" for={props.id}>
+                {props.label}
+            </Label>
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+                <Input
+                    class="w-28! flex-[0_1_7rem] rounded-lg! border-0! bg-background! tabular-nums"
+                    id={props.id}
+                    type="number"
+                    inputmode="decimal"
+                    required
+                    step="any"
+                    min={props.minimum / unit()}
+                    max={props.maximum == null ? undefined : props.maximum / unit()}
+                    disabled={props.disabled}
+                    value={props.seconds / unit()}
+                    onInvalid={props.invalid}
+                    aria-invalid={props.isInvalid ? "true" : undefined}
+                    aria-describedby={props.isInvalid ? props.errorId : undefined}
+                    onInput={(event) =>
+                        props.change(Duration.seconds(event.currentTarget.valueAsNumber, unit()))
+                    }
+                />
+                <select
+                    class="min-h-10 rounded-lg border-0 bg-background px-3 text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
+                    aria-label={t("durationUnit", { label: props.label })}
+                    disabled={props.disabled}
+                    value={unit()}
+                    onChange={(event) => setUnit(Number(event.currentTarget.value))}
+                >
+                    <For each={Duration.units}>
+                        {(item) => <option value={item.seconds}>{t(item.label)}</option>}
+                    </For>
+                </select>
+            </div>
+        </div>
+    );
+}
+
+function Rotation(
+    props: AccountActions & {
+        target: "photo" | "emoji";
+        settings: Settings;
+        applied: Settings | null;
+        count: number;
+        next: number | null;
+        now: number;
+        locked: boolean;
+        refresh: () => Promise<void>;
+        beforeAction?: () => Promise<void>;
+        reportSave: ReportSave;
+    },
+) {
+    let jitterDetails!: HTMLDetailsElement;
+    const endpoint = () => (props.target === "photo" ? "settings" : "emojis/settings");
+    const fieldId = (field: string) => `${props.target}-${field}`;
+    const autosave = createAutosave<Settings>(
+        (value) =>
+            props.api.request(endpoint(), "PUT", { ...value, enabled: props.settings.enabled }),
+        () => props.refresh(),
+    );
+    onCleanup(autosave.dispose);
+    const saveKey = () => (props.target === "photo" ? "photoSettings" : "emojiSettings");
+    const settings = () => autosave.draft() ?? props.settings;
+    const intervalInvalid = () =>
+        !Number.isFinite(settings().interval_secs) || settings().interval_secs < 1;
+    const jitterInvalid = () =>
+        settings().jitter_secs != null &&
+        (!Number.isFinite(settings().jitter_secs) ||
+            settings().jitter_secs! < 0 ||
+            settings().jitter_secs! >= settings().interval_secs);
+    const valid = () => !intervalInvalid() && !jitterInvalid();
+    createEffect(jitterInvalid, (invalid) => {
+        if (invalid) jitterDetails.open = true;
+    });
+    createEffect(
+        () => [autosave.status(), valid()] as const,
+        ([status, isValid]) =>
+            props.reportSave(
+                saveKey(),
+                status,
+                isValid,
+                () => void autosave.retry().catch(() => {}),
+            ),
+    );
+    onCleanup(() => props.reportSave(saveKey(), "idle", true, () => {}));
+    const configEqual = (a: Settings, b: Settings) =>
+        a.mode === b.mode && a.interval_secs === b.interval_secs && a.jitter_secs === b.jitter_secs;
+    createEffect(
+        () => [autosave.status(), autosave.draft(), props.settings] as const,
+        ([status, draft, saved]) => {
+            if (status === "saved" && draft && configEqual(draft, saved)) autosave.acknowledge();
+        },
+    );
+
+    function edit(change: Partial<Settings>) {
+        const value = { ...settings(), ...change };
+        const isValid =
+            Number.isFinite(value.interval_secs) &&
+            value.interval_secs >= 1 &&
+            (value.jitter_secs == null ||
+                (Number.isFinite(value.jitter_secs) &&
+                    value.jitter_secs >= 0 &&
+                    value.jitter_secs < value.interval_secs));
+        autosave.edit(value, isValid);
+    }
+
+    function action(name: "apply" | "start" | "stop") {
+        // oxlint-disable-next-line solid/reactivity -- perform invokes this callback when the action runs; it is not a reactive computation.
+        void props.perform(async () => {
+            if (name !== "stop") {
+                await autosave.flush();
+                await props.beforeAction?.();
+            }
+            await props.api.request(`${endpoint()}/${name}`, "POST");
+        });
+    }
+
+    return (
+        <section
+            class="rounded-2xl bg-surface p-4 sm:p-5"
+            aria-labelledby={fieldId("rotation-title")}
+        >
+            <h2 class="m-0! text-base! font-semibold tracking-tight" id={fieldId("rotation-title")}>
+                {props.target === "photo" ? t("photoRotation") : t("emojiRotation")}
+            </h2>
+            <form
+                class="my-5! grid gap-4!"
+                onSubmit={(event) => {
+                    event.preventDefault();
+                }}
+            >
+                <label class="flex min-h-10 cursor-pointer items-center gap-3 self-start justify-self-start text-sm font-semibold">
+                    {t("randomOrder")}
+                    <input
+                        class="size-5 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        type="checkbox"
+                        checked={settings().mode === "random"}
+                        disabled={props.busy}
+                        onChange={(event) =>
+                            edit({ mode: event.currentTarget.checked ? "random" : "ordered" })
+                        }
+                    />
+                </label>
+                <DurationField
+                    id={fieldId("interval")}
+                    label={t("delay")}
+                    seconds={settings().interval_secs}
+                    minimum={1}
+                    disabled={props.busy}
+                    isInvalid={intervalInvalid()}
+                    errorId={fieldId("invalid-settings")}
+                    change={(seconds) => edit({ interval_secs: seconds })}
+                />
+                <details
+                    class="group rounded-xl bg-muted/60 px-4 py-2 text-sm"
+                    ref={(element) => {
+                        jitterDetails = element;
+                    }}
+                >
+                    <summary
+                        class="relative cursor-pointer py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        aria-label={
+                            settings().jitter_secs == null
+                                ? t("jitterAutomaticLabel")
+                                : t("jitterCustomLabel")
+                        }
+                        aria-describedby={fieldId("jitter-help")}
+                    >
+                        {t("jitter")}
+                        <span class="ms-1 inline-grid size-5 place-items-center rounded-full bg-surface text-xs text-muted-foreground">
+                            <span aria-hidden="true">?</span>
+                            <span
+                                class="invisible absolute bottom-full inset-s-0 z-10 w-64 max-w-full rounded-lg bg-foreground px-3 py-2 text-sm font-normal text-background shadow-lg group-focus-within:visible group-hover:visible"
+                                id={fieldId("jitter-help")}
+                                role="tooltip"
+                            >
+                                {t("jitterHelp")}
+                            </span>
+                        </span>
+                        <span class="ms-3 text-sm font-normal text-muted-foreground">
+                            {settings().jitter_secs == null ? t("automatic") : t("custom")}
+                        </span>
+                    </summary>
+                    <div class="my-2 grid gap-2">
+                        <Label for={fieldId("jitter-mode")}>{t("jitterSetting")}</Label>
+                        <select
+                            class="min-h-10 rounded-lg border-0 bg-background px-3 text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
+                            id={fieldId("jitter-mode")}
+                            disabled={props.busy}
+                            value={settings().jitter_secs == null ? "auto" : "custom"}
+                            onChange={(event) =>
+                                edit({
+                                    jitter_secs:
+                                        event.currentTarget.value === "auto"
+                                            ? null
+                                            : Duration.defaultJitter(settings().interval_secs),
+                                })
+                            }
+                        >
+                            <option value="auto">{t("automaticJitter")}</option>
+                            <option value="custom">{t("custom")}</option>
+                        </select>
+                        <Show when={settings().jitter_secs != null}>
+                            <DurationField
+                                id={fieldId("jitter")}
+                                label={t("customJitter")}
+                                seconds={settings().jitter_secs ?? 0}
+                                minimum={0}
+                                maximum={settings().interval_secs - 1}
+                                disabled={props.busy}
+                                isInvalid={jitterInvalid()}
+                                errorId={fieldId("invalid-settings")}
+                                change={(seconds) => edit({ jitter_secs: seconds })}
+                                invalid={() => {
+                                    jitterDetails.open = true;
+                                }}
+                            />
+                        </Show>
+                    </div>
+                </details>
+                <span id={fieldId("invalid-settings")} class="visually-hidden">
+                    {t("invalidSettings")}
+                </span>
+                <div class="flex flex-wrap items-center gap-2">
+                    <Show
+                        when={props.settings.enabled}
+                        fallback={
+                            <Button
+                                disabled={props.locked || props.count === 0 || !valid()}
+                                onClick={() => action("start")}
+                            >
+                                {t("startRotation")}
+                            </Button>
+                        }
+                    >
+                        <Button
+                            disabled={
+                                props.locked ||
+                                !valid() ||
+                                !props.applied ||
+                                configEqual(settings(), props.applied)
+                            }
+                            onClick={() => action("apply")}
+                        >
+                            {t("applySettings")}
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            disabled={props.locked}
+                            onClick={() => action("stop")}
+                        >
+                            {t("stopRotation")}
+                        </Button>
+                    </Show>
+                </div>
+            </form>
+            <p class="m-0 text-sm text-muted-foreground tabular-nums" role="status">
+                {props.settings.enabled
+                    ? props.next
+                        ? t(props.target === "photo" ? "nextPhoto" : "nextEmoji", {
+                              time: timeRemaining(props.next, props.now),
+                          })
+                        : t("running")
+                    : t("stopped")}
+            </p>
+        </section>
+    );
+}
+
+function emojiSource(emoji: EmojiChoice): string {
+    if (emoji.source_kind === "recent") return t("emojiSourceRecent");
+    if (emoji.source_kind === "default") return t("emojiSourceDefault");
+    return emoji.source;
+}
+
+function EmojiPicker(
+    props: AccountActions & {
+        notify: Notify;
+        selected: string[];
+        selectedEmojis: EmojiChoice[];
+        premium: boolean;
+        autosave: ReturnType<typeof createAutosave<string[]>>;
+    },
+) {
+    // The keyed account workspace owns this catalog for the lifetime of its account API.
+    const packs = untrack(() => createEmojiPacks(props.api));
+    const [pickerOpen, setPickerOpen] = createSignal(false);
+    let addButton!: HTMLButtonElement;
+    const selected = () => props.autosave.draft() ?? props.selected;
+
+    createEffect(
+        () => props.premium && pickerOpen(),
+        (open) => {
+            if (open) untrack(() => void packs.select());
+        },
+    );
+    createEffect(
+        () => [packs.activeId, packs.active?.error] as const,
+        ([id, message], previous) => {
+            if (message && (id !== previous?.[0] || message !== previous?.[1])) {
+                props.notify(message, () => void packs.select(id));
+            }
+        },
+    );
+
+    function save(ids: string[]) {
+        props.autosave.edit(ids);
+    }
+
+    function toggle(id: string) {
+        save(
+            selected().includes(id)
+                ? selected().filter((item) => item !== id)
+                : [...selected(), id],
+        );
+    }
+
+    function closePicker() {
+        setPickerOpen(false);
+        addButton.focus();
+    }
+
+    return (
+        <section aria-label={t("emojiStatus")}>
+            <Show when={props.premium}>
+                <SortableList
+                    kind="emoji"
+                    busy={props.busy}
+                    reorder={save}
+                    remove={toggle}
+                    items={selected().map((id) => {
+                        const choice =
+                            packs.find(id) ?? props.selectedEmojis.find((emoji) => emoji.id === id);
+                        return {
+                            id,
+                            label: choice?.label ?? id,
+                            mediaUrl: props.api.emojiMediaUrl(id),
+                            textColor: choice?.text_color,
+                        };
+                    })}
+                    trailing={
+                        <button
+                            type="button"
+                            class="emoji-add"
+                            aria-label={t("addEmoji")}
+                            aria-expanded={pickerOpen() ? "true" : "false"}
+                            aria-controls="emoji-browser"
+                            ref={(element) => {
+                                addButton = element;
+                            }}
+                            onClick={() => setPickerOpen(!pickerOpen())}
+                        >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                                <path d="M12 5v14M5 12h14" />
+                            </svg>
+                        </button>
+                    }
+                />
+                <div
+                    id="emoji-browser"
+                    class="emoji-browser"
+                    hidden={!pickerOpen()}
+                    onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                            event.preventDefault();
+                            closePicker();
+                        }
+                    }}
+                >
+                    <nav class="emoji-packs" aria-label={t("emojiPacks")}>
+                        <button
+                            type="button"
+                            aria-label={t("recentDefault")}
+                            title={t("recentDefault")}
+                            aria-pressed={packs.activeId === "" ? "true" : "false"}
+                            aria-controls="emoji-pack-choices"
+                            onClick={() => void packs.select("")}
+                        >
+                            <svg class="pack-glyph" aria-hidden="true" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="8" />
+                                <path d="M12 7v5l3 2" />
+                            </svg>
+                        </button>
+                        <For each={packs.sets}>
+                            {(set) => (
+                                <button
+                                    type="button"
+                                    aria-label={set.title}
+                                    title={set.title}
+                                    aria-pressed={packs.activeId === set.id ? "true" : "false"}
+                                    aria-controls="emoji-pack-choices"
+                                    onClick={() => void packs.select(set.id)}
+                                >
+                                    <span aria-hidden="true">
+                                        <EmojiMedia
+                                            url={set.cover_url}
+                                            label={set.title}
+                                            textColor={set.text_color}
+                                            fallback={
+                                                <svg class="pack-glyph" viewBox="0 0 24 24">
+                                                    <rect
+                                                        x="5"
+                                                        y="3"
+                                                        width="14"
+                                                        height="18"
+                                                        rx="3"
+                                                    />
+                                                    <path d="M8 8h8M8 12h8M8 16h4" />
+                                                </svg>
+                                            }
+                                        />
+                                    </span>
+                                </button>
+                            )}
+                        </For>
+                        <Show when={!packs.sets.length && (!packs.active || packs.active.loading)}>
+                            <For each={[0, 1, 2, 3, 4, 5]}>
+                                {() => (
+                                    <span class="pack-skeleton" aria-hidden="true">
+                                        <span class="emoji-skeleton" />
+                                    </span>
+                                )}
+                            </For>
+                        </Show>
+                    </nav>
+                    <div
+                        id="emoji-pack-choices"
+                        role="region"
+                        aria-labelledby="emoji-pack-title"
+                        aria-busy={packs.active?.loading ? "true" : "false"}
+                    >
+                        <h3 id="emoji-pack-title">{packs.title}</h3>
+                        <Show when={!packs.active || packs.active.loading}>
+                            <p class="visually-hidden" role="status">
+                                {t("loadingEmoji")}
+                            </p>
+                            <div class="emojis" aria-hidden="true">
+                                <For
+                                    each={Array.from(
+                                        { length: Math.min(packs.count || 24, 36) },
+                                        (_, index) => index,
+                                    )}
+                                >
+                                    {() => (
+                                        <span class="emoji-preview">
+                                            <span class="emoji-skeleton" />
+                                        </span>
+                                    )}
+                                </For>
+                            </div>
+                        </Show>
+                        <Show when={packs.active?.error}>
+                            <button type="button" onClick={() => void packs.select()}>
+                                {t("retry")}
+                            </button>
+                        </Show>
+                        <Show when={packs.active?.choices}>
+                            {(choices) => (
+                                <Show
+                                    when={choices().length}
+                                    fallback={<p class="hint">{t("emptyEmojiPack")}</p>}
+                                >
+                                    <div class="emojis">
+                                        <For each={choices()}>
+                                            {(emoji) => (
+                                                <label
+                                                    class="emoji-choice"
+                                                    title={emojiSource(emoji)}
+                                                    onPointerMove={tilt}
+                                                    onPointerLeave={resetTilt}
+                                                    onPointerCancel={resetTilt}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        aria-label={`${emoji.label} (${emojiSource(emoji)})`}
+                                                        checked={selected().includes(emoji.id)}
+                                                        disabled={props.busy}
+                                                        onChange={() => toggle(emoji.id)}
+                                                    />
+                                                    <span class="emoji-preview" aria-hidden="true">
+                                                        <EmojiMedia
+                                                            url={props.api.emojiMediaUrl(emoji.id)}
+                                                            label={emoji.label}
+                                                            textColor={emoji.text_color}
+                                                        />
+                                                    </span>
+                                                </label>
+                                            )}
+                                        </For>
+                                    </div>
+                                </Show>
+                            )}
+                        </Show>
+                    </div>
+                </div>
+            </Show>
+        </section>
+    );
+}

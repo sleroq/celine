@@ -1,0 +1,38 @@
+{
+    "name": "celine-web",
+    "private": true,
+    "version": "0.1.0",
+    "license": "WTFPL",
+    "type": "module",
+    "scripts": {
+        "dev": "bun --bun vite --host 127.0.0.1",
+        "typecheck": "bun --bun tsc --noEmit",
+        "lint": "oxlint --deny-warnings && tw-lint \"src/**/*.{ts,tsx,css}\" --tailwind-config src/ui.css --max-warnings 0",
+        "format": "oxfmt src tests vite.config.ts",
+        "format:check": "oxfmt --check src tests vite.config.ts",
+        "build": "bun run typecheck && bun --bun vite build",
+        "test": "bun test tests"
+    },
+    "dependencies": {
+        "@solidjs/web": "2.0.0-rc.20",
+        "cropperjs": "1.6.2",
+        "lottie-web": "^5.13.0",
+        "solid-js": "2.0.0-rc.20",
+        "sortablejs": "^1.15.7"
+    },
+    "devDependencies": {
+        "@dayflower/tw-lint": "^0.5.3",
+        "@solidjs/babel-plugin": "2.0.0-rc.20",
+        "@solidjs/compiler": "2.0.0-rc.20",
+        "@solidjs/vite-plugin": "3.0.0-next.53",
+        "@tailwindcss/vite": "^4.3.5",
+        "@types/bun": "latest",
+        "@types/sortablejs": "^1.15.9",
+        "eslint-plugin-solid": "^0.18.1",
+        "oxfmt": "^0.77.0",
+        "oxlint": "^1.92.0",
+        "tailwindcss": "^4.3.5",
+        "typescript": "~7.0.2",
+        "vite": "^8.3.5"
+    }
+}

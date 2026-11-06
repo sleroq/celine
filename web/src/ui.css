@@ -1,0 +1,53 @@
+/* Import Tailwind without preflight: the existing application owns its reset. */
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@source not "./components/ui/README.md";
+
+@theme inline {
+    --color-background: var(--ui-background);
+    --color-surface: var(--ui-surface);
+    --color-foreground: var(--ui-foreground);
+    --color-muted: var(--ui-muted);
+    --color-muted-foreground: var(--ui-muted-foreground);
+    --color-muted-hover: var(--ui-muted-hover);
+    --color-border: var(--ui-border);
+    --color-accent: var(--ui-accent);
+    --color-accent-foreground: var(--ui-accent-foreground);
+    --color-ring: var(--ui-ring);
+    --color-danger: var(--ui-danger);
+    --color-danger-foreground: var(--ui-danger-foreground);
+}
+
+:root {
+    /* Rosé Pine Dawn */
+    --ui-background: #faf4ed;
+    --ui-surface: #fffaf3;
+    --ui-foreground: #575279;
+    --ui-muted: #f2e9e1;
+    --ui-muted-hover: #dfdad9;
+    --ui-muted-foreground: #6e6a86;
+    --ui-border: #cecacd;
+    --ui-accent: #286983;
+    --ui-accent-foreground: #fffaf3;
+    --ui-ring: #286983;
+    --ui-danger: #9d3153;
+    --ui-danger-foreground: #fffaf3;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        /* Rosé Pine */
+        --ui-background: #101010;
+        --ui-surface: #1f1d2e;
+        --ui-foreground: #e0def4;
+        --ui-muted: #191724;
+        --ui-muted-hover: #403d52;
+        --ui-muted-foreground: #908caa;
+        --ui-border: #524f67;
+        --ui-accent: #c4a7e7;
+        --ui-accent-foreground: #191724;
+        --ui-ring: #c4a7e7;
+        --ui-danger: #eb6f92;
+        --ui-danger-foreground: #191724;
+    }
+}

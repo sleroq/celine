@@ -1,0 +1,391 @@
+import { serverMessages } from "./server-messages";
+
+const en = {
+    cropPhoto: "Crop photo {name}",
+    cropTitle: "Crop photo",
+    cropHint:
+        "Drag the square or its handles to adjust. The circle shows the visible profile photo.",
+    cropReset: "Reset to center",
+    cropSave: "Save crop",
+    cancel: "Cancel",
+    cropLoading: "Loading original photo…",
+    cropLoadError: "Could not load the original photo.",
+    cropSaveError: "Could not save the crop.",
+
+    cannotReachCeline: "Cannot reach Celine.",
+    requestFailed: "Request failed.",
+    requestFailedStatus: "Request failed ({status}).",
+    photoErrorContext: "Photo rotation: {message}",
+    emojiErrorContext: "Emoji rotation: {message}",
+    connecting: "Connecting…",
+    rotationSettings: "Rotation settings",
+    profilePhotos: "Profile photos",
+    emojiStatus: "Emoji status",
+    cannotLoadPhotos: "Cannot load Telegram photos.",
+    uploadPhotos: "Upload photos",
+    photoUploadHint:
+        "Drag photos here or upload JPEG/PNG, 160–4096 px, up to 10 MiB. Center-cropped to a square.",
+    checkingPhotoHistory: "Checking Telegram photo history…",
+    selectExistingPhotos: "Select existing photos",
+    telegramProfilePhotos: "Telegram profile photos",
+    telegramPhotoName: "Telegram photo",
+    reorderTelegramPhoto: "Reorder Telegram photo",
+    removeTelegramPhoto: "Remove Telegram photo",
+    loadingPhotos: "Loading Telegram photos…",
+    retry: "Retry",
+    dismissNotification: "Dismiss notification",
+    retrySaveContext: "Retry saving: {context}",
+    saveFailedContext: "Could not save {context}.",
+    noTelegramPhotos: "No Telegram profile photos yet. Upload photos to start your rotation.",
+    includeTelegramPhoto: "Include Telegram photo {number} in rotation",
+    photoSelectionHint: "Removing a photo from rotation does not delete it from Telegram.",
+    photoNotLinked: "New profile pic, not matched with existing ones.",
+    currentPhoto: "Current photo",
+    durationUnit: "{label} unit",
+    unitSecond: "sec",
+    unitMinute: "min",
+    unitHour: "hour",
+    unitDay: "day",
+    photoRotation: "Photo rotation",
+    emojiRotation: "Emoji rotation",
+    settingsSaved: "Settings saved.",
+    randomOrder: "Random order",
+    delay: "Delay",
+    jitter: "Jitter (±)",
+    jitterAutomaticLabel: "Jitter settings, automatic",
+    jitterCustomLabel: "Jitter settings, custom",
+    jitterHelp:
+        "Randomly adds or subtracts time so photo and emoji changes avoid exact intervals and look more human.",
+    jitterSetting: "Jitter setting",
+    automatic: "Automatic",
+    custom: "Custom",
+    automaticJitter: "Automatic (10% of delay, up to 5 min)",
+    customJitter: "Custom jitter (±)",
+    saveSettings: "Save settings",
+    applySettings: "Apply settings",
+    savingChanges: "Saving changes…",
+    invalidSettings: "Enter a valid delay and jitter to save.",
+    invalidSettingsContext: "{context}: Enter a valid delay and jitter to save.",
+    stopRotation: "Stop rotation",
+    startRotation: "Start rotation",
+    nextPhoto: "Running · Next photo in {time}",
+    nextEmoji: "Running · Next emoji in {time}",
+    running: "Running",
+    stopped: "Stopped",
+    premiumRequired: "Telegram Premium required.",
+    addEmoji: "Add emoji",
+    emojiPacks: "Emoji packs",
+    recentDefault: "Recent / default",
+    emojiSourceRecent: "Recent",
+    emojiSourceDefault: "Default",
+    loadingEmoji: "Loading emoji…",
+    emptyEmojiPack: "No emoji here yet. Try another pack.",
+    finishSavingBeforeSwitch: "Save or fix pending changes before switching accounts.",
+    accountsNew: "New account",
+    accountsManage: "Manage accounts: {name}",
+    accountsTelegram: "Telegram accounts",
+    accountsSwitch: "Switch to {name}",
+    accountsAdd: "Add account",
+    accountsLogout: "Log out of {name}",
+    loginTitle: "Log in to Telegram",
+    loginQrStopped: "QR code refresh stopped. Refresh this page to try again.",
+    loginQrInstructions: "Telegram → Settings → Devices → Link desktop device. Scan this code.",
+    loginQrAlt: "Telegram login QR code",
+    loginQrRefreshing: "Refreshing QR code…",
+    loginQrExpires: "Expires in {time}",
+    loginWaiting: "Waiting for Telegram…",
+    loginPassword: "Two-step verification password",
+    loginContinue: "Continue",
+    reorderMoved: "Moved {name} to position {position} of {count}.",
+    reorderSelected: "{name} selected. Choose where to move it.",
+    reorderHint:
+        "Drag to reorder, or select an item and then its destination. Arrow keys work too.",
+    reorderPhotoOrder: "Photo rotation order",
+    reorderEmojiOrder: "Emoji rotation order",
+    reorderPhoto: "Reorder photo {name}",
+    reorderEmoji: "Reorder emoji {name}",
+    reorderRemovePhoto: "Remove photo {name}",
+    reorderRemoveEmoji: "Remove emoji {name}",
+    emojiPacksLoadError: "Could not load emoji.",
+} as const;
+
+type MessageKey = keyof typeof en;
+type Catalog = Record<MessageKey, string>;
+
+const ru: Catalog = {
+    cropPhoto: "Обрезать фото {name}",
+    cropTitle: "Обрезать фото",
+    cropHint: "Перетащите квадрат или его края. Круг показывает видимую часть фото профиля.",
+    cropReset: "Вернуть в центр",
+    cropSave: "Сохранить обрезку",
+    cancel: "Отмена",
+    cropLoading: "Загружаем оригинал фото…",
+    cropLoadError: "Не удалось загрузить оригинал фото.",
+    cropSaveError: "Не удалось сохранить обрезку.",
+
+    cannotReachCeline: "Не удалось подключиться к Celine.",
+    requestFailed: "Не удалось выполнить запрос.",
+    requestFailedStatus: "Не удалось выполнить запрос ({status}).",
+    photoErrorContext: "Смена фото: {message}",
+    emojiErrorContext: "Смена эмодзи: {message}",
+    connecting: "Подключение…",
+    rotationSettings: "Настройки смены",
+    profilePhotos: "Фото профиля",
+    emojiStatus: "Эмодзи-статус",
+    cannotLoadPhotos: "Не удалось загрузить фото из Telegram.",
+    uploadPhotos: "Загрузить фото",
+    photoUploadHint:
+        "Перетащите фото сюда или загрузите JPEG/PNG, 160–4096 пикс., до 10 МиБ. Фото будет обрезано до квадрата по центру.",
+    checkingPhotoHistory: "Проверяем историю фото в Telegram…",
+    selectExistingPhotos: "Выбрать существующие фото",
+    telegramProfilePhotos: "Фото профиля в Telegram",
+    telegramPhotoName: "Фото из Telegram",
+    reorderTelegramPhoto: "Переместить фото из Telegram",
+    removeTelegramPhoto: "Удалить фото из Telegram",
+    loadingPhotos: "Загружаем фото из Telegram…",
+    retry: "Повторить",
+    dismissNotification: "Закрыть уведомление",
+    retrySaveContext: "Повторить сохранение: {context}",
+    saveFailedContext: "Не удалось сохранить: {context}.",
+    noTelegramPhotos: "Фото профиля в Telegram пока нет. Загрузите фото, чтобы начать смену.",
+    includeTelegramPhoto: "Добавить фото Telegram №{number} в смену",
+    photoSelectionHint: "Удаление фото из списка не удаляет его из Telegram.",
+    photoNotLinked: "Новое фото профиля, не совпадает с существующими.",
+    currentPhoto: "Текущее фото",
+    durationUnit: "Единица измерения: {label}",
+    unitSecond: "сек",
+    unitMinute: "мин",
+    unitHour: "ч",
+    unitDay: "дн",
+    photoRotation: "Смена фото",
+    emojiRotation: "Смена эмодзи",
+    settingsSaved: "Настройки сохранены.",
+    randomOrder: "Случайный порядок",
+    delay: "Интервал",
+    jitter: "Разброс (±)",
+    jitterAutomaticLabel: "Настройки разброса: автоматически",
+    jitterCustomLabel: "Настройки разброса: вручную",
+    jitterHelp:
+        "Случайно прибавляет или вычитает время, чтобы фото и эмодзи менялись не через точные интервалы, а более естественно.",
+    jitterSetting: "Настройка разброса",
+    automatic: "Автоматически",
+    custom: "Вручную",
+    automaticJitter: "Автоматически (10% интервала, до 5 мин)",
+    customJitter: "Разброс вручную (±)",
+    saveSettings: "Сохранить настройки",
+    applySettings: "Применить настройки",
+    savingChanges: "Сохраняем изменения…",
+    invalidSettings: "Укажите допустимый интервал и разброс для сохранения.",
+    invalidSettingsContext: "{context}: Укажите допустимый интервал и разброс для сохранения.",
+    stopRotation: "Остановить смену",
+    startRotation: "Начать смену",
+    nextPhoto: "Работает · Следующее фото через {time}",
+    nextEmoji: "Работает · Следующий эмодзи через {time}",
+    running: "Работает",
+    stopped: "Остановлено",
+    premiumRequired: "Нужен Telegram Premium.",
+    addEmoji: "Добавить эмодзи",
+    emojiPacks: "Наборы эмодзи",
+    recentDefault: "Недавние / стандартные",
+    emojiSourceRecent: "Недавние",
+    emojiSourceDefault: "Стандартные",
+    loadingEmoji: "Загружаем эмодзи…",
+    emptyEmojiPack: "Здесь пока нет эмодзи. Попробуйте другой набор.",
+    finishSavingBeforeSwitch: "Сохраните или исправьте изменения перед переключением аккаунта.",
+    accountsNew: "Новый аккаунт",
+    accountsManage: "Управление аккаунтами: {name}",
+    accountsTelegram: "Аккаунты Telegram",
+    accountsSwitch: "Переключиться на {name}",
+    accountsAdd: "Добавить аккаунт",
+    accountsLogout: "Выйти из аккаунта {name}",
+    loginTitle: "Вход в Telegram",
+    loginQrStopped: "Обновление QR-кода остановлено. Обновите страницу, чтобы попробовать снова.",
+    loginQrInstructions:
+        "Telegram → Настройки → Устройства → Подключить устройство. Отсканируйте код.",
+    loginQrAlt: "QR-код для входа в Telegram",
+    loginQrRefreshing: "Обновляем QR-код…",
+    loginQrExpires: "Истекает через {time}",
+    loginWaiting: "Ожидаем Telegram…",
+    loginPassword: "Пароль двухэтапной аутентификации",
+    loginContinue: "Продолжить",
+    reorderMoved: "{name} перемещено на позицию {position} из {count}.",
+    reorderSelected: "Выбрано: {name}. Выберите новую позицию.",
+    reorderHint:
+        "Перетащите элемент или выберите его и новую позицию. Можно также использовать стрелки.",
+    reorderPhotoOrder: "Порядок смены фото",
+    reorderEmojiOrder: "Порядок смены эмодзи",
+    reorderPhoto: "Переместить фото {name}",
+    reorderEmoji: "Переместить эмодзи {name}",
+    reorderRemovePhoto: "Удалить фото {name}",
+    reorderRemoveEmoji: "Удалить эмодзи {name}",
+    emojiPacksLoadError: "Не удалось загрузить эмодзи.",
+};
+
+const uk: Catalog = {
+    cropPhoto: "Обрізати фото {name}",
+    cropTitle: "Обрізати фото",
+    cropHint: "Перетягніть квадрат або його краї. Коло показує видиму частину фото профілю.",
+    cropReset: "Повернути в центр",
+    cropSave: "Зберегти обрізання",
+    cancel: "Скасувати",
+    cropLoading: "Завантажуємо оригінал фото…",
+    cropLoadError: "Не вдалося завантажити оригінал фото.",
+    cropSaveError: "Не вдалося зберегти обрізання.",
+
+    cannotReachCeline: "Не вдалося підключитися до Celine.",
+    requestFailed: "Не вдалося виконати запит.",
+    requestFailedStatus: "Не вдалося виконати запит ({status}).",
+    photoErrorContext: "Зміна фото: {message}",
+    emojiErrorContext: "Зміна емодзі: {message}",
+    connecting: "Підключення…",
+    rotationSettings: "Налаштування зміни",
+    profilePhotos: "Фото профілю",
+    emojiStatus: "Емодзі-статус",
+    cannotLoadPhotos: "Не вдалося завантажити фото з Telegram.",
+    uploadPhotos: "Завантажити фото",
+    photoUploadHint:
+        "Перетягніть фото сюди або завантажте JPEG/PNG, 160–4096 пікс., до 10 МіБ. Фото буде обрізано до квадрата по центру.",
+    checkingPhotoHistory: "Перевіряємо історію фото в Telegram…",
+    selectExistingPhotos: "Вибрати наявні фото",
+    telegramProfilePhotos: "Фото профілю в Telegram",
+    telegramPhotoName: "Фото з Telegram",
+    reorderTelegramPhoto: "Перемістити фото з Telegram",
+    removeTelegramPhoto: "Видалити фото з Telegram",
+    loadingPhotos: "Завантажуємо фото з Telegram…",
+    retry: "Повторити",
+    dismissNotification: "Закрити сповіщення",
+    retrySaveContext: "Повторити збереження: {context}",
+    saveFailedContext: "Не вдалося зберегти: {context}.",
+    noTelegramPhotos: "Фото профілю в Telegram ще немає. Завантажте фото, щоб почати зміну.",
+    includeTelegramPhoto: "Додати фото Telegram №{number} до зміни",
+    photoSelectionHint: "Видалення фото зі списку не видаляє його з Telegram.",
+    photoNotLinked: "Нове фото профілю, не збігається з наявними.",
+    currentPhoto: "Поточне фото",
+    durationUnit: "Одиниця виміру: {label}",
+    unitSecond: "сек",
+    unitMinute: "хв",
+    unitHour: "год",
+    unitDay: "дн",
+    photoRotation: "Зміна фото",
+    emojiRotation: "Зміна емодзі",
+    settingsSaved: "Налаштування збережено.",
+    randomOrder: "Випадковий порядок",
+    delay: "Інтервал",
+    jitter: "Розкид (±)",
+    jitterAutomaticLabel: "Налаштування розкиду: автоматично",
+    jitterCustomLabel: "Налаштування розкиду: вручну",
+    jitterHelp:
+        "Випадково додає або віднімає час, щоб фото й емодзі змінювалися не через точні інтервали, а природніше.",
+    jitterSetting: "Налаштування розкиду",
+    automatic: "Автоматично",
+    custom: "Вручну",
+    automaticJitter: "Автоматично (10% інтервалу, до 5 хв)",
+    customJitter: "Розкид вручну (±)",
+    saveSettings: "Зберегти налаштування",
+    applySettings: "Застосувати налаштування",
+    savingChanges: "Зберігаємо зміни…",
+    invalidSettings: "Укажіть допустимий інтервал і розкид для збереження.",
+    invalidSettingsContext: "{context}: Укажіть допустимий інтервал і розкид для збереження.",
+    stopRotation: "Зупинити зміну",
+    startRotation: "Почати зміну",
+    nextPhoto: "Працює · Наступне фото через {time}",
+    nextEmoji: "Працює · Наступний емодзі через {time}",
+    running: "Працює",
+    stopped: "Зупинено",
+    premiumRequired: "Потрібен Telegram Premium.",
+    addEmoji: "Додати емодзі",
+    emojiPacks: "Набори емодзі",
+    recentDefault: "Нещодавні / стандартні",
+    emojiSourceRecent: "Нещодавні",
+    emojiSourceDefault: "Стандартні",
+    loadingEmoji: "Завантажуємо емодзі…",
+    emptyEmojiPack: "Тут ще немає емодзі. Спробуйте інший набір.",
+    finishSavingBeforeSwitch: "Збережіть або виправте зміни перед перемиканням облікового запису.",
+    accountsNew: "Новий обліковий запис",
+    accountsManage: "Керування обліковими записами: {name}",
+    accountsTelegram: "Облікові записи Telegram",
+    accountsSwitch: "Перемкнутися на {name}",
+    accountsAdd: "Додати обліковий запис",
+    accountsLogout: "Вийти з облікового запису {name}",
+    loginTitle: "Вхід у Telegram",
+    loginQrStopped: "Оновлення QR-коду зупинено. Оновіть сторінку, щоб спробувати знову.",
+    loginQrInstructions:
+        "Telegram → Налаштування → Пристрої → Підключити пристрій. Відскануйте код.",
+    loginQrAlt: "QR-код для входу в Telegram",
+    loginQrRefreshing: "Оновлюємо QR-код…",
+    loginQrExpires: "Спливає через {time}",
+    loginWaiting: "Очікуємо на Telegram…",
+    loginPassword: "Пароль двоетапної перевірки",
+    loginContinue: "Продовжити",
+    reorderMoved: "{name} переміщено на позицію {position} із {count}.",
+    reorderSelected: "Вибрано: {name}. Виберіть нову позицію.",
+    reorderHint:
+        "Перетягніть елемент або виберіть його й нову позицію. Можна також використовувати стрілки.",
+    reorderPhotoOrder: "Порядок зміни фото",
+    reorderEmojiOrder: "Порядок зміни емодзі",
+    reorderPhoto: "Перемістити фото {name}",
+    reorderEmoji: "Перемістити емодзі {name}",
+    reorderRemovePhoto: "Видалити фото {name}",
+    reorderRemoveEmoji: "Видалити емодзі {name}",
+    emojiPacksLoadError: "Не вдалося завантажити емодзі.",
+};
+
+export const messages = { en, ru, uk };
+export type Locale = keyof typeof messages;
+
+export function resolveLocale(languages: readonly string[]): Locale {
+    for (const language of languages) {
+        const base = language.toLowerCase().split("-")[0];
+        if (base === "en" || base === "ru" || base === "uk") return base;
+    }
+    return "en";
+}
+
+export const locale = resolveLocale(
+    navigator.languages?.length
+        ? navigator.languages
+        : navigator.language
+          ? [navigator.language]
+          : [],
+);
+
+type Parameters = Record<string, string | number>;
+
+export type MessageInfo = { code: string; params: Parameters };
+
+function interpolate(message: string, params?: Parameters): string {
+    return message.replace(/\{(\w+)\}/g, (placeholder, name: string) =>
+        params?.[name] == null ? placeholder : String(params[name]),
+    );
+}
+
+export function translate(language: Locale, key: MessageKey, params?: Parameters): string {
+    return interpolate(messages[language][key], params);
+}
+
+export function t(key: MessageKey, params?: Parameters): string {
+    return translate(locale, key, params);
+}
+
+export function translateServerMessage(
+    language: Locale,
+    info?: MessageInfo | null,
+    english?: string | null,
+): string {
+    if (!info) return language === "en" && english ? english : translate(language, "requestFailed");
+    const catalog: Record<string, string> = serverMessages[language];
+    const template = Object.hasOwn(catalog, info.code)
+        ? catalog[info.code]
+        : catalog["error.unclassified"];
+    const params = { ...info.params };
+    if (params.seconds != null)
+        params.seconds = new Intl.NumberFormat(language).format(Number(params.seconds));
+    const message = interpolate(template, params);
+    if (params.context === "photo") return translate(language, "photoErrorContext", { message });
+    if (params.context === "emoji") return translate(language, "emojiErrorContext", { message });
+    return message;
+}
+
+export function serverMessage(info?: MessageInfo | null, english?: string | null): string {
+    return translateServerMessage(locale, info, english);
+}

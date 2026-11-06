@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: celine
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary: celine
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: celine
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: celine
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: celine.exe
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            binary: celine.exe
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.99.1
+          targets: ${{ matrix.target }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - name: Install frontend dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: Build binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Name binary
+        shell: bash
+        run: |
+          mkdir release
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "release/celine-${{ matrix.target }}${{ matrix.binary == 'celine.exe' && '.exe' || '' }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: celine-${{ matrix.target }}
+          path: release/*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          path: release
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" release/* --verify-tag --generate-notes
