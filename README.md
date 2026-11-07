@@ -2,6 +2,8 @@
 
 # Celine
 
+![Celine profile photos interface](assets/pic.jpg)
+
 ## Run with Nix
 
 ```sh
