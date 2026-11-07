@@ -3,6 +3,7 @@ use std::{env, path::PathBuf, process::Command};
 fn main() {
     for path in [
         "web/src",
+        "web/scripts",
         "web/index.html",
         "web/package.json",
         "web/bun.lock",

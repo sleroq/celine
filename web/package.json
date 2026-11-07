@@ -5,12 +5,12 @@
     "license": "WTFPL",
     "type": "module",
     "scripts": {
-        "dev": "bun --bun vite --host 127.0.0.1",
+        "dev": "bun scripts/vite.ts --host 127.0.0.1",
         "typecheck": "bun --bun tsc --noEmit",
         "lint": "oxlint --deny-warnings && tw-lint \"src/**/*.{ts,tsx,css}\" --tailwind-config src/ui.css --max-warnings 0",
-        "format": "oxfmt src tests vite.config.ts",
-        "format:check": "oxfmt --check src tests vite.config.ts",
-        "build": "bun run typecheck && bun --bun vite build",
+        "format": "oxfmt src tests scripts vite.config.ts",
+        "format:check": "oxfmt --check src tests scripts vite.config.ts",
+        "build": "bun run typecheck && bun scripts/vite.ts build",
         "test": "bun test tests"
     },
     "dependencies": {
