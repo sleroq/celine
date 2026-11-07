@@ -6,8 +6,6 @@ import { Select as SelectPrimitive } from "@kobalte/core/select";
 
 import { cx } from "../../lib/cva";
 
-export const SelectPortal = SelectPrimitive.Portal;
-
 export type SelectProps<Option, OptGroup = never> = ComponentProps<
     typeof SelectPrimitive<Option, OptGroup, "div">
 >;
@@ -15,12 +13,13 @@ export type SelectProps<Option, OptGroup = never> = ComponentProps<
 export const Select = <Option, OptGroup = never>(props: SelectProps<Option, OptGroup>) => {
     const rest = omit(props, "class");
 
+    // Inline content starts at the trigger, so listbox autofocus cannot scroll the page to a portal's origin.
     return (
         <SelectPrimitive<Option, OptGroup>
             data-slot="select"
             placement="bottom-start"
             gutter={4}
-            class={cx("grid w-full gap-2", props.class)}
+            class={cx("relative grid w-full gap-2", props.class)}
             {...rest}
         />
     );

@@ -721,13 +721,13 @@ impl Telegram {
         Ok((bytes, content_type))
     }
 
-    pub async fn set_emoji_status(&mut self, id: &str) -> Result<(), TelegramError> {
+    pub async fn set_emoji_status(&mut self, id: Option<&str>) -> Result<(), TelegramError> {
         self.require_available()?;
         self.require_authorized()?;
         // Check Premium against Telegram now, not a saved local entitlement.
         self.verify_identity().await?;
         self.require_available()?;
-        if !self.profile.as_ref().is_some_and(|profile| profile.premium) {
+        if id.is_some() && !self.profile.as_ref().is_some_and(|profile| profile.premium) {
             return Err(TelegramError::message(
                 "telegram.premium_required",
                 "Telegram Premium is required for emoji statuses.",
@@ -737,7 +737,10 @@ impl Telegram {
             .connection
             .client()
             .invoke(&tl::functions::account::UpdateEmojiStatus {
-                emoji_status: selected_emoji_status(id)?,
+                emoji_status: id
+                    .map(selected_emoji_status)
+                    .transpose()?
+                    .unwrap_or(tl::enums::EmojiStatus::Empty),
             })
             .await
             .map_err(|error| self.handle_error(error))?;

@@ -29,6 +29,9 @@ type Item = {
     reorderLabel?: string;
     removeLabel?: string;
     current?: boolean;
+    statusUrl?: string;
+    statusLabel?: string;
+    statusTextColor?: boolean;
 };
 
 type Props = {
@@ -41,6 +44,7 @@ type Props = {
     recover?: (id: string) => void;
     trailing?: JSX.Element;
     edit?: (id: string, button: HTMLButtonElement) => void;
+    editStatus?: (id: string, button: HTMLButtonElement) => void;
     preview?: (id: string, button: HTMLButtonElement) => void;
 };
 
@@ -141,7 +145,11 @@ export function SortableList(props: Props) {
                                 <div class="sortable-surface relative">
                                     <button
                                         type="button"
-                                        class="sortable-handle rounded-lg border bg-[Canvas] shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                        class={[
+                                            "sortable-handle rounded-lg border bg-[Canvas] shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]",
+                                            props.kind === "emoji" && "photo-icon-action",
+                                            item().current && "border-accent! ring-2 ring-accent",
+                                        ]}
                                         aria-label={
                                             item().reorderLabel ??
                                             (props.kind === "photo"
@@ -219,19 +227,29 @@ export function SortableList(props: Props) {
                                     <Show when={item().current}>
                                         <span
                                             id={`${props.kind}-current-${id}`}
-                                            class="pointer-events-none absolute inset-s-1 top-1 grid size-5 place-items-center rounded-md bg-accent text-accent-foreground shadow-sm"
+                                            class="visually-hidden"
                                         >
-                                            <svg
-                                                aria-hidden="true"
-                                                class="size-3.5 fill-none stroke-current stroke-2"
-                                                viewBox="0 0 16 16"
-                                            >
-                                                <path d="m3 8 3 3 7-7" />
-                                            </svg>
-                                            <span class="visually-hidden sr-only">
-                                                {t("currentPhoto")}
-                                            </span>
+                                            {t("currentPhoto")}
                                         </span>
+                                    </Show>
+                                    <Show when={item().statusUrl}>
+                                        {(url) => (
+                                            <button
+                                                type="button"
+                                                class="photo-icon-action absolute -inset-s-2 -top-2 grid size-10 min-h-0 place-items-center rounded-md border border-border bg-surface/90 p-0.5 shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                                aria-label={t("changeLinkedEmoji")}
+                                                disabled={props.busy}
+                                                onClick={(event) =>
+                                                    props.editStatus?.(id, event.currentTarget)
+                                                }
+                                            >
+                                                <EmojiMedia
+                                                    url={url()}
+                                                    label={item().statusLabel ?? t("emojiStatus")}
+                                                    textColor={item().statusTextColor}
+                                                />
+                                            </button>
+                                        )}
                                     </Show>
                                     <Show when={item().badge}>
                                         {(badge) => (
@@ -270,7 +288,7 @@ export function SortableList(props: Props) {
                                                             <TooltipTrigger
                                                                 as="button"
                                                                 type="button"
-                                                                class="pointer-events-auto grid size-full min-h-0 place-items-center rounded-md border-0 bg-transparent p-0 text-inherit focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                                                class="photo-icon-action pointer-events-auto grid size-full min-h-0 place-items-center rounded-md border-0 bg-transparent p-0 text-inherit focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
                                                                 aria-label={label()}
                                                                 aria-describedby={`${props.kind}-badge-${id}`}
                                                                 disabled={props.busy}
@@ -304,21 +322,23 @@ export function SortableList(props: Props) {
                                     <Show when={props.edit}>
                                         <button
                                             type="button"
-                                            class="sortable-edit shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
-                                            aria-label={t("cropPhoto", { name: item().label })}
+                                            class="sortable-edit photo-icon-action shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                            aria-label={t("photoSettingsFor", {
+                                                name: item().label,
+                                            })}
                                             disabled={props.busy}
                                             onClick={(event) =>
                                                 props.edit?.(id, event.currentTarget)
                                             }
                                         >
                                             <svg aria-hidden="true" viewBox="0 0 24 24">
-                                                <path d="M6 3v12a3 3 0 0 0 3 3h12M3 6h12a3 3 0 0 1 3 3v12" />
+                                                <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
                                             </svg>
                                         </button>
                                     </Show>
                                     <button
                                         type="button"
-                                        class="sortable-remove shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                        class="sortable-remove photo-icon-action shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
                                         aria-label={
                                             item().removeLabel ??
                                             (props.kind === "photo"

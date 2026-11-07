@@ -6,7 +6,6 @@ export {
     SelectContent,
     SelectItem,
     SelectLabel,
-    SelectPortal,
     SelectTrigger,
     SelectValue,
 } from "./select";

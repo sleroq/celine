@@ -92,6 +92,8 @@ pub struct Photo {
     pub history_checked: bool,
     #[serde(default)]
     pub crop: Option<Crop>,
+    #[serde(default)]
+    pub emoji_status: Option<EmojiChoice>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -102,10 +104,18 @@ pub struct Crop {
     pub size: f64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PendingPhotoStatus {
+    pub photo_id: String,
+    pub status_id: Option<String>,
+    pub retry_at: u64,
+}
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Library {
     pub photos: Vec<Photo>,
+    pub pending_photo_status: Option<PendingPhotoStatus>,
     pub settings: Settings,
     pub selected_emojis: Vec<EmojiChoice>,
     pub emoji_settings: Settings,
@@ -120,6 +130,46 @@ pub struct Library {
     pub photo_start_pending: bool,
 }
 impl Library {
+    pub fn has_saved_emoji_document(&self, id: i64) -> bool {
+        let id = id.to_string();
+        self.selected_emojis
+            .iter()
+            .chain(
+                self.photos
+                    .iter()
+                    .filter_map(|photo| photo.emoji_status.as_ref()),
+            )
+            .any(|emoji| emoji.document_id.as_deref().unwrap_or(&emoji.id) == id)
+    }
+
+    pub fn has_photo_statuses(&self) -> bool {
+        self.photos.iter().any(|photo| photo.emoji_status.is_some())
+    }
+
+    pub fn set_photo_status(&mut self, id: &str, status: Option<EmojiChoice>) -> Result<()> {
+        self.photos
+            .iter_mut()
+            .find(|photo| photo.id == id)
+            .context(Message::new("photo.not_found", "Photo not found."))?
+            .emoji_status = status;
+        if self.has_photo_statuses() {
+            self.emoji_settings.enabled = false;
+            self.applied_emoji_settings = None;
+            self.next_emoji_rotation_at = None;
+        }
+        Ok(())
+    }
+
+    pub fn check_emoji_rotation(&self) -> Result<()> {
+        if self.has_photo_statuses() {
+            bail!(Message::new(
+                "validation.photo_emoji_rotation_conflict",
+                "Remove photo emoji statuses before starting independent emoji rotation."
+            ));
+        }
+        Ok(())
+    }
+
     pub fn photo_rotation_due(&self, now: u64) -> bool {
         self.applied_settings.is_some() && self.next_rotation_at.is_none_or(|due| due <= now)
     }
@@ -178,6 +228,9 @@ impl Library {
     }
     pub fn update_emoji_settings(&mut self, settings: Settings, now: u64) -> Result<()> {
         settings.validate()?;
+        if settings.enabled {
+            self.check_emoji_rotation()?;
+        }
         if settings.enabled && self.selected_emojis.is_empty() {
             bail!(Message::new(
                 "validation.emoji_selection_required",
@@ -189,12 +242,18 @@ impl Library {
                 .next_at(now)
                 .max(self.telegram_not_before.unwrap_or(0))
         });
+        if settings.enabled {
+            self.pending_photo_status = None;
+        }
         self.applied_emoji_settings = settings.enabled.then(|| settings.clone());
         self.emoji_settings = settings;
         Ok(())
     }
     pub fn defer_telegram(&mut self, until: u64) {
         self.telegram_not_before = Some(until);
+        if let Some(pending) = &mut self.pending_photo_status {
+            pending.retry_at = pending.retry_at.max(until);
+        }
         for due in [&mut self.next_rotation_at, &mut self.next_emoji_rotation_at]
             .into_iter()
             .flatten()
@@ -501,6 +560,7 @@ impl Repository {
             },
             history_checked,
             crop: None,
+            emoji_status: None,
         };
         let photos = self.dir.join("photos");
         let original_path = photos.join(format!("{}.original", photo.id));
@@ -660,6 +720,7 @@ impl Repository {
                 telegram_id: Some(telegram_id),
                 history_checked: true,
                 crop: None,
+                emoji_status: None,
             });
             Ok(())
         })
@@ -668,6 +729,13 @@ impl Repository {
         let path = self.photo_path(id)?;
         self.update(|library| {
             library.photos.retain(|p| p.id != id);
+            if library
+                .pending_photo_status
+                .as_ref()
+                .is_some_and(|pending| pending.photo_id == id)
+            {
+                library.pending_photo_status = None;
+            }
             if library.photos.is_empty() {
                 library.settings.enabled = false;
                 library.applied_settings = None;
@@ -778,8 +846,54 @@ mod tests {
             telegram_id: None,
             history_checked: true,
             crop: None,
+            emoji_status: None,
         }
     }
+    #[test]
+    fn photo_status_compatibility_and_conflict_lifecycle() {
+        let legacy: Photo = serde_json::from_str(r#"{"id":"a","name":"a"}"#).unwrap();
+        assert!(legacy.emoji_status.is_none());
+        let mut library = Library {
+            photos: vec![legacy, photo("b")],
+            ..Library::default()
+        };
+        let mut choice = emoji("collectible:100");
+        choice.document_id = Some("42".into());
+        library.select_emojis(vec![choice.clone()]);
+        let settings = Settings {
+            enabled: true,
+            ..Settings::default()
+        };
+        library.update_emoji_settings(settings.clone(), 0).unwrap();
+        library.set_photo_status("a", Some(choice)).unwrap();
+        assert!(!library.emoji_settings.enabled);
+        assert!(library.applied_emoji_settings.is_none());
+        assert!(library.next_emoji_rotation_at.is_none());
+        assert_eq!(library.selected_emojis.len(), 1);
+        let error = library
+            .update_emoji_settings(settings.clone(), 0)
+            .unwrap_err();
+        assert_eq!(
+            crate::messages::MessageInfo::from_error(&error).code,
+            "validation.photo_emoji_rotation_conflict"
+        );
+        let mut library: Library =
+            serde_json::from_slice(&serde_json::to_vec(&library).unwrap()).unwrap();
+        library.reorder(&["b".into(), "a".into()]).unwrap();
+        assert_eq!(
+            library.photos[1]
+                .emoji_status
+                .as_ref()
+                .unwrap()
+                .document_id
+                .as_deref(),
+            Some("42")
+        );
+        library.set_photo_status("a", None).unwrap();
+        assert!(library.applied_emoji_settings.is_none());
+        library.update_emoji_settings(settings, 0).unwrap();
+    }
+
     #[test]
     fn state_save_errors_identify_storage_problems() {
         let dir = tempfile::tempdir().unwrap();

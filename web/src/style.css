@@ -397,12 +397,12 @@ input[aria-invalid="true"] {
     margin-block: 0 0.5rem;
     overflow-wrap: anywhere;
 }
-#emoji-pack-choices,
+.emoji-pack-choices,
 .emoji-packs {
     scrollbar-width: thin;
     scrollbar-color: var(--ui-border) transparent;
 }
-#emoji-pack-choices {
+.emoji-pack-choices {
     min-height: 0;
     overflow-y: auto;
     scrollbar-gutter: stable;
@@ -863,11 +863,24 @@ input[type="number"] {
     stroke-linecap: round;
     stroke-linejoin: round;
 }
+@media (hover: hover) {
+    .photo-icon-action:not(:disabled, [aria-disabled="true"]):hover {
+        cursor: pointer;
+        background-color: color-mix(in srgb, Highlight 18%, Canvas);
+        scale: 1.1;
+    }
+}
+.photo-icon-action:not(:disabled, [aria-disabled="true"]):active {
+    scale: 0.96;
+}
 @media (prefers-reduced-motion: no-preference) {
+    .photo-icon-action {
+        transition: scale 150ms ease-out, background-color 150ms ease-out;
+    }
     .sortable-list-photo .sortable-remove,
     .sortable-list-photo .sortable-edit,
     .photo-preview-edit {
-        transition: opacity 150ms ease;
+        transition: opacity 150ms ease, scale 150ms ease-out, background-color 150ms ease-out;
     }
 }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {

@@ -15,6 +15,7 @@ export type Photo = {
     telegram_id: string | null;
     history_checked: boolean;
     crop: Crop | null;
+    emoji_status: EmojiChoice | null;
 };
 export type State = {
     active_account_id: string;
@@ -91,7 +92,7 @@ type RequestBody =
     | { crop: Crop | null }
     | { password: string }
     | { ids: string[] }
-    | { id: string }
+    | { id: string | null }
     | FormData;
 
 export const request = createRequest("/api/");
@@ -101,11 +102,17 @@ export type AccountApi = ReturnType<typeof accountApi>;
 export function accountApi(id: string) {
     const path = `accounts/${encodeURIComponent(id)}`;
     const base = `/api/${path}/`;
+
     function photoUrl(photoId: string) {
         return `${base}photos/${encodeURIComponent(photoId)}`;
     }
     function photoHistoryUrl(telegramId: string) {
         return `${base}photos/history/${encodeURIComponent(telegramId)}`;
+    }
+    function savePhotoEmoji(id: string, choice: string | null) {
+        return createRequest(base)(`photos/${encodeURIComponent(id)}/emoji-status`, "PUT", {
+            id: choice,
+        });
     }
     return {
         request: createRequest(base),
@@ -116,6 +123,18 @@ export function accountApi(id: string) {
         originalPhotoUrl: (id: string) => `${photoUrl(id)}/original`,
         reuploadPhoto: (id: string) =>
             createRequest(base)(`photos/${encodeURIComponent(id)}/reupload`, "POST"),
+        savePhotoEmoji,
+        async clearPhotoEmojis(ids: string[]) {
+            const failures: unknown[] = [];
+            for (const id of ids) {
+                try {
+                    await savePhotoEmoji(id, null);
+                } catch (error) {
+                    failures.push(error);
+                }
+            }
+            if (failures.length) throw failures[0];
+        },
         saveCrop: (id: string, crop: Crop | null) =>
             createRequest(base)(`photos/${encodeURIComponent(id)}/crop`, "PUT", { crop }),
         emojiMediaUrl: (documentId: string) =>

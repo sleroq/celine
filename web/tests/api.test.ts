@@ -90,6 +90,19 @@ describe("request errors", () => {
 describe("account-scoped requests", () => {
     afterEach(() => mock.restore());
 
+    test("clears all photo statuses even if one sync fails", async () => {
+        const fetch = spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(new Response(null, { status: 503 }))
+            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        await expect(accountApi("a/b").clearPhotoEmojis(["first", "second"])).rejects.toThrow(
+            "Request failed (503).",
+        );
+        expect(fetch.mock.calls.map(([url, options]) => [url, options?.body])).toEqual([
+            ["/api/accounts/a%2Fb/photos/first/emoji-status", JSON.stringify({ id: null })],
+            ["/api/accounts/a%2Fb/photos/second/emoji-status", JSON.stringify({ id: null })],
+        ]);
+    });
+
     test("keeps settings, login, and delayed work bound to the original account", async () => {
         const fetch = spyOn(globalThis, "fetch").mockResolvedValue(
             new Response(null, { status: 204 }),
@@ -186,6 +199,30 @@ describe("account-scoped requests", () => {
         expect(
             fetch.mock.calls.map(([url, options]) => [url, options?.method, options?.body]),
         ).toEqual([["/api/accounts/a%2Fb/photos/p%2Fq/reupload", "POST", undefined]]);
+    });
+
+    test("assigns and clears photo emoji statuses on the original account with opaque IDs", async () => {
+        const fetch = spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(null, { status: 204 }),
+        );
+        const api = accountApi("account/one");
+        const choice = "collectible:9223372036854775806";
+        await api.savePhotoEmoji("photo/one", choice);
+        await api.savePhotoEmoji("photo/one", null);
+        expect(
+            fetch.mock.calls.map(([url, options]) => [url, options?.method, options?.body]),
+        ).toEqual([
+            [
+                "/api/accounts/account%2Fone/photos/photo%2Fone/emoji-status",
+                "PUT",
+                JSON.stringify({ id: choice }),
+            ],
+            [
+                "/api/accounts/account%2Fone/photos/photo%2Fone/emoji-status",
+                "PUT",
+                JSON.stringify({ id: null }),
+            ],
+        ]);
     });
 
     test("saves and resets crop on the account-scoped photo", async () => {

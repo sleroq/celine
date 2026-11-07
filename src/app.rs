@@ -13,7 +13,7 @@ use serde::Serialize;
 use tokio::sync::{Mutex, MutexGuard, RwLock};
 
 use crate::{
-    library::{Library, Photo, Repository, Settings},
+    library::{Library, PendingPhotoStatus, Photo, Repository, Settings},
     photo_cache::PhotoCache,
     telegram::{AuthState, EmojiChoice, HistoryPhoto, Profile, Telegram, TelegramError},
 };
@@ -33,12 +33,16 @@ impl PhotoHistoryClient for Telegram {
 }
 
 trait PhotoClient {
+    async fn set_emoji_status(&mut self, id: Option<&str>) -> Result<(), TelegramError>;
     async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError>;
     async fn use_history_photo(&mut self, id: &str) -> Result<bool, TelegramError>;
     async fn set_photo(&mut self, path: &std::path::Path) -> Result<String, TelegramError>;
 }
 
 impl PhotoClient for Telegram {
+    async fn set_emoji_status(&mut self, id: Option<&str>) -> Result<(), TelegramError> {
+        Telegram::set_emoji_status(self, id).await
+    }
     async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
         Telegram::current_photo(self).await
     }
@@ -133,6 +137,7 @@ pub struct App {
     pub choices: Mutex<Vec<EmojiChoice>>,
     pub last_error: RwLock<Option<LocalizedMessage>>,
     photo_error: RwLock<Option<LocalizedMessage>>,
+    photo_status_error: RwLock<Option<LocalizedMessage>>,
     emoji_error: RwLock<Option<LocalizedMessage>>,
     credentials: Option<Credentials>,
     dir: PathBuf,
@@ -141,7 +146,14 @@ impl App {
     pub fn open(dir: PathBuf, credentials: Option<Credentials>) -> Result<Arc<Self>> {
         let repository = Repository::open(dir.clone())?;
         let photo_cache = PhotoCache::open(&dir)?;
-        let choices = repository.data.selected_emojis.clone();
+        let mut choices = repository.data.selected_emojis.clone();
+        choices.extend(
+            repository
+                .data
+                .photos
+                .iter()
+                .filter_map(|photo| photo.emoji_status.clone()),
+        );
         let auth = AuthState {
             message_info: Some(MessageInfo::new(if credentials.is_some() { "auth.connecting" } else { "auth.unconfigured" })),
             status: if credentials.is_some() { "disconnected" } else { "unconfigured" }.into(),
@@ -159,6 +171,7 @@ impl App {
             choices: Mutex::new(choices),
             last_error: RwLock::new(None),
             photo_error: RwLock::new(None),
+            photo_status_error: RwLock::new(None),
             emoji_error: RwLock::new(None),
             credentials,
             dir,
@@ -208,6 +221,7 @@ impl App {
             .await
             .clone()
             .or(self.photo_error.read().await.clone())
+            .or(self.photo_status_error.read().await.clone())
             .or(self.emoji_error.read().await.clone());
         let recovery = if *self.photo_cache_status.read().await == PhotoCacheStatus::Ready
             && photo_cache.complete()
@@ -261,6 +275,9 @@ impl App {
     }
     pub async fn schedule(&self, emoji: bool, action: ScheduleAction) -> Result<()> {
         let mut repository = self.repository.lock().await;
+        if emoji && !matches!(action, ScheduleAction::Stop) {
+            repository.data.check_emoji_rotation()?;
+        }
         let (saved, running) = if emoji {
             (
                 &repository.data.emoji_settings,
@@ -296,6 +313,9 @@ impl App {
         let interval_seconds = settings.interval_secs;
         if emoji {
             repository.update(|library| library.update_emoji_settings(settings, now()))?;
+            if repository.data.pending_photo_status.is_none() {
+                *self.photo_status_error.write().await = None;
+            }
         } else {
             let starting = matches!(action, ScheduleAction::Start);
             repository.schedule_photos(settings, now())?;
@@ -348,6 +368,162 @@ impl App {
         *self.emoji_error.write().await = None;
         Ok(())
     }
+    pub async fn set_photo_status(&self, id: &str, choice_id: Option<&str>) -> Result<()> {
+        let status = match choice_id {
+            Some(id) => Some(
+                self.choices
+                    .lock()
+                    .await
+                    .iter()
+                    .find(|choice| choice.id == id)
+                    .context(Message::new(
+                        "emoji.catalog_refresh_required",
+                        "Refresh the emoji catalog before selecting this emoji.",
+                    ))?
+                    .clone(),
+            ),
+            None => None,
+        };
+        let mut connection = self.lock_telegram().await;
+        let queued = {
+            let mut queued = false;
+            let mut repository = self.repository.lock().await;
+            let was_per_photo = repository.data.has_photo_statuses();
+            repository.update(|library| {
+                library.set_photo_status(id, status)?;
+                if library.applied_settings.is_none()
+                    && library
+                        .pending_photo_status
+                        .as_ref()
+                        .is_some_and(|pending| pending.photo_id == id)
+                {
+                    library.pending_photo_status = None;
+                }
+                let entering_per_photo = !was_per_photo && library.has_photo_statuses();
+                let active = library
+                    .applied_settings
+                    .as_ref()
+                    .and_then(|_| {
+                        library.photos.iter().find(|photo| {
+                            library.last_photo_id.as_deref() == Some(photo.id.as_str())
+                                && (photo.id == id || entering_per_photo)
+                        })
+                    })
+                    .cloned();
+                if let Some(photo) = active {
+                    queued = true;
+                    library.pending_photo_status = Some(PendingPhotoStatus {
+                        photo_id: photo.id,
+                        status_id: photo.emoji_status.map(|status| status.id),
+                        retry_at: now(),
+                    });
+                }
+                Ok(())
+            })?;
+            if queued || repository.data.pending_photo_status.is_none() {
+                *self.photo_status_error.write().await = None;
+            }
+            queued
+        };
+        if queued {
+            match connection.as_mut() {
+                Some(telegram) => {
+                    self.retry_photo_status(telegram).await?;
+                    *self.profile.write().await = telegram.profile();
+                }
+                None => {
+                    self.defer_photo_status(&unavailable()).await?;
+                    return Err(unavailable().into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn queue_photo_status(&self, id: &str) -> Result<(), TelegramError> {
+        self.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.pending_photo_status = if library.has_photo_statuses() {
+                    library
+                        .photos
+                        .iter()
+                        .find(|photo| photo.id == id)
+                        .map(|photo| PendingPhotoStatus {
+                            photo_id: photo.id.clone(),
+                            status_id: photo.emoji_status.as_ref().map(|status| status.id.clone()),
+                            retry_at: now(),
+                        })
+                } else {
+                    None
+                };
+                Ok(())
+            })
+            .map_err(storage_error)?;
+        *self.photo_status_error.write().await = None;
+        Ok(())
+    }
+
+    async fn defer_photo_status(&self, error: &TelegramError) -> Result<(), TelegramError> {
+        self.repository
+            .lock()
+            .await
+            .update(|library| {
+                if let Some(pending) = &mut library.pending_photo_status {
+                    pending.retry_at = now()
+                        .saturating_add(error.retry_after.unwrap_or(30).max(2))
+                        .max(library.telegram_not_before.unwrap_or(0));
+                }
+                Ok(())
+            })
+            .map_err(storage_error)
+    }
+
+    async fn retry_photo_status(
+        &self,
+        telegram: &mut impl PhotoClient,
+    ) -> Result<(), TelegramError> {
+        let pending = {
+            let mut repository = self.repository.lock().await;
+            let Some(pending) = repository.data.pending_photo_status.clone() else {
+                return Ok(());
+            };
+            if now()
+                < pending
+                    .retry_at
+                    .max(repository.data.telegram_not_before.unwrap_or(0))
+            {
+                return Ok(());
+            }
+            repository
+                .update(|library| {
+                    library.pending_photo_status.as_mut().unwrap().retry_at =
+                        now().saturating_add(30);
+                    Ok(())
+                })
+                .map_err(storage_error)?;
+            pending
+        };
+        if let Err(error) = telegram
+            .set_emoji_status(pending.status_id.as_deref())
+            .await
+        {
+            self.defer_photo_status(&error).await?;
+            return Err(error);
+        }
+        self.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.pending_photo_status = None;
+                Ok(())
+            })
+            .map_err(storage_error)?;
+        *self.photo_status_error.write().await = None;
+        Ok(())
+    }
+
     pub async fn remember_choices(&self, incoming: &[EmojiChoice]) {
         let mut choices = self.choices.lock().await;
         for choice in incoming {
@@ -501,7 +677,11 @@ impl App {
     pub async fn remove_photo(&self, id: &str) -> Result<()> {
         {
             let _cache = self.photo_cache.lock().await;
-            self.repository.lock().await.remove_photo(id)?;
+            let mut repository = self.repository.lock().await;
+            repository.remove_photo(id)?;
+            if repository.data.pending_photo_status.is_none() {
+                *self.photo_status_error.write().await = None;
+            }
         }
         let ready = *self.photo_cache_status.read().await == PhotoCacheStatus::Ready;
         if ready && let Err(error) = self.match_local_photos().await {
@@ -841,6 +1021,18 @@ impl App {
                     return Err(error);
                 }
             }
+            if let Err(mut error) = self.retry_photo_status(telegram).await {
+                tracing::warn!(code = error.info.code, "Photo status update failed");
+                error.info.params["context"] = "photo".into();
+                *self.photo_status_error.write().await = Some(LocalizedMessage::new(
+                    format!("Photo status: {}", error.message),
+                    error.message_info(),
+                ));
+                self.record_telegram_error(&error).await;
+                if blocks_telegram(&error) {
+                    return Err(error);
+                }
+            }
             if let Err(mut error) = self.rotate_emojis_if_due(telegram).await {
                 tracing::warn!(
                     code = error.info.code,
@@ -933,6 +1125,7 @@ impl App {
                         .complete_photo_rotation(&photo.id)
                         .map_err(storage_error)?;
                     *self.photo_error.write().await = None;
+                    self.queue_photo_status(&photo.id).await?;
                     tracing::info!("Photo rotation completed");
                     return Ok(());
                 }
@@ -1016,11 +1209,11 @@ impl App {
             .update(|library| {
                 library.photo_start_pending = false;
                 library.last_photo_id = matched.clone();
-                if let Some(matched) = matched {
+                if let Some(matched) = &matched {
                     let photo = library
                         .photos
                         .iter_mut()
-                        .find(|photo| photo.id == matched)
+                        .find(|photo| photo.id == *matched)
                         .unwrap();
                     photo.telegram_id = current.map(|(id, _)| id);
                     photo.history_checked = true;
@@ -1031,7 +1224,12 @@ impl App {
                 }
                 Ok(())
             })
-            .map_err(storage_error)
+            .map_err(storage_error)?;
+        drop(repository);
+        if let Some(id) = matched {
+            self.queue_photo_status(&id).await?;
+        }
+        Ok(())
     }
 
     async fn rotate_photo(
@@ -1115,7 +1313,7 @@ impl App {
             id
         };
         tracing::info!("Emoji rotation attempted");
-        telegram.set_emoji_status(&id).await?;
+        telegram.set_emoji_status(Some(&id)).await?;
         self.repository
             .lock()
             .await
@@ -1169,6 +1367,7 @@ mod tests {
         Current(Option<(&'static str, Vec<u8>)>),
         Use(&'static str, Result<bool, TelegramError>),
         Upload(&'static str),
+        Status(Option<&'static str>, Result<(), TelegramError>),
     }
 
     struct FakePhotos(VecDeque<PhotoCall>);
@@ -1183,6 +1382,13 @@ mod tests {
     }
 
     impl PhotoClient for FakePhotos {
+        async fn set_emoji_status(&mut self, id: Option<&str>) -> Result<(), TelegramError> {
+            let Some(PhotoCall::Status(expected, result)) = self.0.pop_front() else {
+                panic!("unexpected status update")
+            };
+            assert_eq!(id, expected);
+            result
+        }
         async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
             let Some(PhotoCall::Current(photo)) = self.0.pop_front() else {
                 panic!("unexpected current photo request")
@@ -1206,6 +1412,340 @@ mod tests {
             );
             Ok(id.into())
         }
+    }
+
+    async fn rotate_with_status(
+        app: &App,
+        client: &mut impl PhotoClient,
+    ) -> Result<(), TelegramError> {
+        app.rotate_photos_if_due(client).await?;
+        app.retry_photo_status(client).await
+    }
+
+    fn status_choice() -> EmojiChoice {
+        serde_json::from_value(serde_json::json!({"id":"collectible:100","document_id":"42","label":"Gift","source":"Gift","text_color":false})).unwrap()
+    }
+
+    #[tokio::test]
+    async fn photo_statuses_apply_clear_and_do_not_replay_photo_after_status_failure() {
+        let mut first = photo("a", Some("1"), true);
+        first.emoji_status = Some(status_choice());
+        let (_dir, app) = photo_app(vec![first, photo("b", Some("2"), true)]).await;
+        let mut client = FakePhotos::new([
+            PhotoCall::Use("1", Ok(true)),
+            PhotoCall::Status(Some("collectible:100"), Err(unavailable())),
+        ]);
+        assert!(rotate_with_status(&app, &mut client).await.is_err());
+        client.assert_finished();
+        let library = app.state().await.library;
+        assert_eq!(library.last_photo_id.as_deref(), Some("a"));
+        assert!(library.pending_photo_id.is_none());
+        app.rotate_photos_if_due(&mut FakePhotos::new([]))
+            .await
+            .unwrap();
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.next_rotation_at = Some(0);
+                Ok(())
+            })
+            .unwrap();
+        let mut client = FakePhotos::new([
+            PhotoCall::Use("2", Ok(true)),
+            PhotoCall::Status(None, Ok(())),
+        ]);
+        rotate_with_status(&app, &mut client).await.unwrap();
+        client.assert_finished();
+    }
+
+    async fn retry_status_now(app: &App, expected: Option<&'static str>) {
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.pending_photo_status.as_mut().unwrap().retry_at = 0;
+                library.telegram_not_before = None;
+                Ok(())
+            })
+            .unwrap();
+        let mut client = FakePhotos::new([PhotoCall::Status(expected, Ok(()))]);
+        app.retry_photo_status(&mut client).await.unwrap();
+        client.assert_finished();
+        assert!(app.state().await.library.pending_photo_status.is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_photo_status_retries_after_restart_without_replaying_photo_even_when_stopped() {
+        let mut first = photo("a", Some("1"), true);
+        first.emoji_status = Some(status_choice());
+        let (dir, app) = photo_app(vec![first]).await;
+        let mut error = unavailable();
+        error.retry_after = Some(60);
+        let mut client = FakePhotos::new([
+            PhotoCall::Use("1", Ok(true)),
+            PhotoCall::Status(Some("collectible:100"), Err(error)),
+        ]);
+        let before = now();
+        assert!(rotate_with_status(&app, &mut client).await.is_err());
+        client.assert_finished();
+        assert!(
+            app.state()
+                .await
+                .library
+                .pending_photo_status
+                .unwrap()
+                .retry_at
+                >= before + 60
+        );
+        app.retry_photo_status(&mut FakePhotos::new([]))
+            .await
+            .unwrap();
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.applied_settings = None;
+                Ok(())
+            })
+            .unwrap();
+        drop(app);
+        let app = App::open(dir.path().into(), None).unwrap();
+        assert_eq!(
+            app.state()
+                .await
+                .library
+                .pending_photo_status
+                .unwrap()
+                .photo_id,
+            "a"
+        );
+        retry_status_now(&app, Some("collectible:100")).await;
+        app.rotate_photos_if_due(&mut FakePhotos::new([]))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_active_edits_replace_pending_status_and_standalone_start_cancels_clear() {
+        let (_dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+        app.remember_choices(&[status_choice()]).await;
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.last_photo_id = Some("a".into());
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            app.set_photo_status("a", Some("collectible:100"))
+                .await
+                .is_err()
+        );
+        retry_status_now(&app, Some("collectible:100")).await;
+        assert!(app.set_photo_status("a", None).await.is_err());
+        assert!(
+            app.state()
+                .await
+                .library
+                .pending_photo_status
+                .unwrap()
+                .status_id
+                .is_none()
+        );
+        retry_status_now(&app, None).await;
+        assert!(
+            app.set_photo_status("a", Some("collectible:100"))
+                .await
+                .is_err()
+        );
+        assert!(app.set_photo_status("a", None).await.is_err());
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.select_emojis(vec![status_choice()]);
+                library.update_emoji_settings(
+                    Settings {
+                        enabled: true,
+                        ..Settings::default()
+                    },
+                    now(),
+                )
+            })
+            .unwrap();
+        assert!(app.state().await.library.pending_photo_status.is_none());
+        app.retry_photo_status(&mut FakePhotos::new([]))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn stopped_photo_edits_cancel_obsolete_status_retry_and_error() {
+        for replacement in [None, Some("43")] {
+            let (_dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+            let mut other = status_choice();
+            other.id = "43".into();
+            app.remember_choices(&[status_choice(), other]).await;
+            app.repository
+                .lock()
+                .await
+                .update(|library| {
+                    library.last_photo_id = Some("a".into());
+                    Ok(())
+                })
+                .unwrap();
+            assert!(
+                app.set_photo_status("a", Some("collectible:100"))
+                    .await
+                    .is_err()
+            );
+            *app.photo_status_error.write().await = Some("Status failed".into());
+            app.schedule(false, ScheduleAction::Stop).await.unwrap();
+            app.set_photo_status("a", replacement).await.unwrap();
+            assert!(app.state().await.library.pending_photo_status.is_none());
+            assert!(app.photo_status_error.read().await.is_none());
+            app.retry_photo_status(&mut FakePhotos::new([]))
+                .await
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_status_retry_preserves_unresolved_photo_error() {
+        let (_dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+        app.remember_choices(&[status_choice()]).await;
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.last_photo_id = Some("a".into());
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            app.set_photo_status("a", Some("collectible:100"))
+                .await
+                .is_err()
+        );
+        *app.photo_error.write().await = Some("Photo change failed".into());
+        *app.photo_status_error.write().await = Some("Status failed".into());
+        retry_status_now(&app, Some("collectible:100")).await;
+        assert!(app.photo_status_error.read().await.is_none());
+        assert_eq!(
+            app.state().await.last_error.as_deref(),
+            Some("Photo change failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_photo_cancels_pending_status() {
+        let (_dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+        app.remember_choices(&[status_choice()]).await;
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.last_photo_id = Some("a".into());
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            app.set_photo_status("a", Some("collectible:100"))
+                .await
+                .is_err()
+        );
+        app.remove_photo("a").await.unwrap();
+        assert!(app.state().await.library.pending_photo_status.is_none());
+    }
+
+    #[tokio::test]
+    async fn entering_photo_status_mode_syncs_current_unassigned_photo_only_when_running() {
+        for running in [true, false] {
+            let (_dir, app) = photo_app(vec![
+                photo("a", Some("1"), true),
+                photo("b", Some("2"), true),
+            ])
+            .await;
+            app.remember_choices(&[status_choice()]).await;
+            app.repository
+                .lock()
+                .await
+                .update(|library| {
+                    library.last_photo_id = Some("a".into());
+                    if !running {
+                        library.applied_settings = None;
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            // No Telegram connection: a sync attempt reports unavailable, but the association persists.
+            let result = app.set_photo_status("b", Some("collectible:100")).await;
+            assert_eq!(result.is_err(), running);
+            assert!(app.state().await.library.photos[1].emoji_status.is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn persisted_photo_status_remains_authorized_and_remembered_after_restart() {
+        let (dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+        app.remember_choices(&[status_choice()]).await;
+        app.set_photo_status("a", Some("collectible:100"))
+            .await
+            .unwrap();
+        drop(app);
+        let app = App::open(dir.path().into(), None).unwrap();
+        {
+            let repository = app.repository.lock().await;
+            assert!(repository.data.selected_emojis.is_empty());
+            assert!(repository.data.has_saved_emoji_document(42));
+            assert!(!repository.data.has_saved_emoji_document(100));
+        }
+        app.select_emojis(&["collectible:100".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            app.state().await.library.selected_emojis[0]
+                .document_id
+                .as_deref(),
+            Some("42")
+        );
+        app.set_photo_status("a", None).await.unwrap();
+        app.select_emojis(&[]).await.unwrap();
+        assert!(
+            !app.repository
+                .lock()
+                .await
+                .data
+                .has_saved_emoji_document(42)
+        );
+    }
+
+    #[tokio::test]
+    async fn recognized_current_photo_syncs_status_without_changing_photo() {
+        let mut first = photo("a", Some("1"), true);
+        first.emoji_status = Some(status_choice());
+        let (_dir, app) = photo_app(vec![first]).await;
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.photo_start_pending = true;
+                Ok(())
+            })
+            .unwrap();
+        let mut client = FakePhotos::new([
+            PhotoCall::Current(Some((
+                "1",
+                include_bytes!("../web/public/logo.jpg").to_vec(),
+            ))),
+            PhotoCall::Status(Some("collectible:100"), Err(unavailable())),
+        ]);
+        assert!(rotate_with_status(&app, &mut client).await.is_err());
+        client.assert_finished();
+        assert!(!app.state().await.library.photo_start_pending);
+        retry_status_now(&app, Some("collectible:100")).await;
     }
 
     #[tokio::test]
@@ -1407,6 +1947,9 @@ mod tests {
     }
 
     impl PhotoClient for TransitioningPhoto {
+        async fn set_emoji_status(&mut self, _id: Option<&str>) -> Result<(), TelegramError> {
+            panic!("unexpected status update")
+        }
         async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
             Ok(None)
         }
@@ -1431,6 +1974,7 @@ mod tests {
             telegram_id: telegram_id.map(String::from),
             history_checked,
             crop: None,
+            emoji_status: None,
         }
     }
 
@@ -2088,6 +2632,7 @@ mod tests {
                     telegram_id: None,
                     history_checked: true,
                     crop: None,
+                    emoji_status: None,
                 });
                 library.update_settings(
                     Settings {

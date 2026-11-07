@@ -44,6 +44,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/photos/{id}/reupload", post(reupload_photo))
         .route("/api/photos/{id}/original", get(original_photo))
         .route("/api/photos/{id}/crop", put(save_crop))
+        .route("/api/photos/{id}/emoji-status", put(save_photo_status))
         .route("/api/auth/qr", post(qr))
         .route("/api/auth/password", post(password))
         .route("/api/emojis", get(emojis).put(select_emojis))
@@ -377,9 +378,7 @@ async fn emoji_media(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Respon
         .lock()
         .await
         .data
-        .selected_emojis
-        .iter()
-        .any(|emoji| emoji.document_id.as_deref().unwrap_or(&emoji.id) == id.to_string());
+        .has_saved_emoji_document(id);
     match telegram.emoji_media(id, selected).await {
         Ok((bytes, content_type)) => {
             ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
@@ -600,6 +599,41 @@ async fn original_photo(State(app): State<Arc<App>>, Path(id): Path<String>) -> 
 #[serde(deny_unknown_fields)]
 struct CropRequest {
     crop: Option<Crop>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PhotoStatusRequest {
+    id: Option<String>,
+}
+
+async fn save_photo_status(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Json(request): Json<PhotoStatusRequest>,
+) -> Response {
+    if !app
+        .repository
+        .lock()
+        .await
+        .data
+        .photos
+        .iter()
+        .any(|photo| photo.id == id)
+    {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "Photo not found.",
+            MessageInfo::new("photo.not_found"),
+        );
+    }
+    match app.set_photo_status(&id, request.id.as_deref()).await {
+        Ok(()) => ok(),
+        Err(error) => match error.downcast::<TelegramError>() {
+            Ok(error) => telegram_error(&app, error).await,
+            Err(error) => bad(error),
+        },
+    }
 }
 
 async fn save_crop(
@@ -1220,6 +1254,104 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
+
+    #[tokio::test]
+    async fn account_photo_status_route_uses_trusted_catalog_and_clears() {
+        let dir = tempfile::tempdir().unwrap();
+        let accounts = crate::accounts::Accounts::open(dir.path().into(), None).unwrap();
+        let (account, app) = accounts.app(None).await.unwrap();
+        app.repository
+            .lock()
+            .await
+            .add_history_photo("1".into())
+            .unwrap();
+        let id = app.state().await.library.photos[0].id.clone();
+        let choice: crate::telegram::EmojiChoice = serde_json::from_value(json!({
+            "id":"collectible:100", "document_id":"42", "label":"Gift", "source":"Gift", "text_color":false
+        })).unwrap();
+        app.remember_choices(&[choice]).await;
+        let router = accounts_router(accounts);
+        for (photo, choice, expected) in [
+            (id.as_str(), json!("unknown"), StatusCode::BAD_REQUEST),
+            ("missing", json!(null), StatusCode::NOT_FOUND),
+            (
+                id.as_str(),
+                json!("collectible:100"),
+                StatusCode::NO_CONTENT,
+            ),
+            (id.as_str(), json!(null), StatusCode::NO_CONTENT),
+        ] {
+            let request = Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/api/accounts/{account}/photos/{photo}/emoji-status"
+                ))
+                .header(header::HOST, ADDRESS)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"id":choice}).to_string()))
+                .unwrap();
+            assert_eq!(
+                router.clone().oneshot(request).await.unwrap().status(),
+                expected
+            );
+            if choice == "collectible:100" {
+                assert_eq!(
+                    app.state().await.library.photos[0]
+                        .emoji_status
+                        .as_ref()
+                        .unwrap()
+                        .document_id
+                        .as_deref(),
+                    Some("42")
+                );
+            }
+        }
+        assert!(app.state().await.library.photos[0].emoji_status.is_none());
+    }
+
+    #[tokio::test]
+    async fn photo_status_sync_failure_preserves_telegram_error_and_saved_association() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::open(dir.path().into(), None).unwrap();
+        {
+            let mut repository = app.repository.lock().await;
+            repository.add_history_photo("1".into()).unwrap();
+            repository
+                .update(|library| {
+                    library.last_photo_id = Some(library.photos[0].id.clone());
+                    library.applied_settings = Some(library.settings.clone());
+                    Ok(())
+                })
+                .unwrap();
+        }
+        let id = app.state().await.library.photos[0].id.clone();
+        let choice: crate::telegram::EmojiChoice = serde_json::from_value(json!({
+            "id":"42", "label":"Star", "source":"Pack", "text_color":false
+        }))
+        .unwrap();
+        app.remember_choices(&[choice]).await;
+        let request = Request::builder()
+            .method("PUT")
+            .uri(format!("/api/photos/{id}/emoji-status"))
+            .header(header::HOST, ADDRESS)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"id":"42"}"#))
+            .unwrap();
+        let response = router(app.clone()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error_info"]["code"], "telegram.not_connected");
+        let state = app.state().await;
+        assert_eq!(
+            state.library.photos[0].emoji_status.as_ref().unwrap().id,
+            "42"
+        );
+        assert_eq!(
+            state.last_error_info.unwrap().code,
+            "telegram.not_connected"
+        );
     }
 
     #[tokio::test]
