@@ -142,17 +142,9 @@ h1.saving {
     color: var(--ui-foreground);
     background: transparent;
 }
-.account-current .account-logout {
-    color: var(--ui-danger);
-    background: color-mix(in srgb, var(--ui-danger) 12%, var(--ui-muted));
-}
 .account-menu :focus-visible {
     outline: 2px solid var(--ui-ring);
     outline-offset: 2px;
-}
-.account-current .account-logout:focus-visible {
-    color: var(--ui-danger-foreground);
-    background: var(--ui-danger);
 }
 .account-menu .profile {
     justify-content: start;
@@ -225,17 +217,11 @@ h1.saving {
     background: transparent;
 }
 @media (hover: hover) {
+    .account-trigger:hover,
     .account-switch:hover,
-    .account-list .account-logout:hover,
+    .account-logout:hover,
     .account-add:hover {
         background: var(--ui-muted-hover);
-    }
-    .account-current .account-trigger:hover {
-        background: var(--ui-muted-hover);
-    }
-    .account-current .account-logout:hover {
-        color: var(--ui-danger-foreground);
-        background: var(--ui-danger);
     }
 }
 .profile-emoji,

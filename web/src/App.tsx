@@ -962,7 +962,7 @@ function Rotation(
                         }}
                     >
                         <summary
-                            class="group relative cursor-pointer py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            class="group/summary relative cursor-pointer py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                             aria-label={
                                 settings().jitter_secs == null
                                     ? t("jitterAutomaticLabel")
@@ -971,10 +971,10 @@ function Rotation(
                             aria-describedby={fieldId("jitter-help")}
                         >
                             {t("jitter")}
-                            <span class="ms-1 inline-grid size-5 place-items-center rounded-full bg-surface text-xs text-muted-foreground">
+                            <span class="group/help ms-1 inline-grid size-5 place-items-center rounded-full bg-surface text-xs text-muted-foreground">
                                 <span aria-hidden="true">?</span>
                                 <span
-                                    class="invisible absolute bottom-full inset-s-0 z-10 w-64 max-w-full rounded-lg bg-foreground px-3 py-2 text-sm font-normal text-background shadow-lg group-focus-visible:visible group-hover:visible"
+                                    class="invisible absolute bottom-full inset-s-0 z-10 w-64 max-w-full rounded-lg bg-foreground px-3 py-2 text-sm font-normal text-background shadow-lg group-focus-visible/summary:visible group-hover/help:visible"
                                     id={fieldId("jitter-help")}
                                     role="tooltip"
                                 >
@@ -1260,6 +1260,7 @@ function EmojiPicker(
                                 <Button
                                     variant="ghost"
                                     size="sm"
+                                    class="aria-disabled:opacity-55"
                                     aria-disabled={packs.active?.loading ? "true" : undefined}
                                     onClick={() => void packs.select("")}
                                 >

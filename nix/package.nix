@@ -23,7 +23,8 @@ let
     dontFixup = true;
     buildPhase = ''
       export HOME="$TMPDIR"
-      BUN_CONFIG_MAX_HTTP_REQUESTS=8 bun install --frozen-lockfile --ignore-scripts --os='*' --cpu='*'
+      # Linux Bun filters musl packages; the older Intel macOS Bun lacks --libc.
+      BUN_CONFIG_MAX_HTTP_REQUESTS=8 bun install --frozen-lockfile --ignore-scripts --os='*' --cpu='*' ${lib.optionalString stdenvNoCC.hostPlatform.isLinux "--libc='*'"}
     '';
     installPhase = ''
       cp -R node_modules "$out"
@@ -60,6 +61,9 @@ rustPlatform.buildRustPackage {
   preBuild = ''
     cp -R ${webDependencies} web/node_modules
     chmod -R u+w web/node_modules
+    # Linux sandboxes do not provide /usr/bin/env for these Bun-invoked scripts.
+    substituteInPlace web/node_modules/typescript/bin/tsc web/node_modules/vite/bin/vite.js \
+      --replace-fail '#!/usr/bin/env node' '#!${lib.getExe bun}'
   '';
   doCheck = true;
   passthru = { inherit webDependencies; };

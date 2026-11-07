@@ -5,11 +5,11 @@
         "lastModified": 1793826729,
         "narHash": "sha256-D5H7H+qMoTGI/jJtxKP4u7BdjkFnUyhOovTrf3pTOr0=",
         "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz"
+        "url": "https://github.com/NixOS/nixpkgs/archive/6dadaf4375be35033e1c84395adbd53ff5fded96.tar.gz"
       },
       "original": {
         "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz"
+        "url": "https://github.com/NixOS/nixpkgs/archive/6dadaf4375be35033e1c84395adbd53ff5fded96.tar.gz"
       }
     },
     "nixpkgs-darwin": {
@@ -17,11 +17,11 @@
         "lastModified": 1793899991,
         "narHash": "sha256-qlSBOPeEyfMLmaet3AmbQwyVpceTL86J8U7pXOFNekg=",
         "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/nixpkgs-26.05-darwin.tar.gz"
+        "url": "https://github.com/NixOS/nixpkgs/archive/d70a468dc082082bedc027275b3b49ac7007c938.tar.gz"
       },
       "original": {
         "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/nixpkgs-26.05-darwin.tar.gz"
+        "url": "https://github.com/NixOS/nixpkgs/archive/d70a468dc082082bedc027275b3b49ac7007c938.tar.gz"
       }
     },
     "root": {
@@ -41,11 +41,11 @@
         "lastModified": 1793870170,
         "narHash": "sha256-0psEeQjs1g9oWQ6eVVGlCom+X3/uHyr6jSMyHVU57u8=",
         "type": "tarball",
-        "url": "https://github.com/oxalica/rust-overlay/archive/master.tar.gz"
+        "url": "https://github.com/oxalica/rust-overlay/archive/19e0e6c951a7a8a7d3232c64e58d26b89df44c60.tar.gz"
       },
       "original": {
         "type": "tarball",
-        "url": "https://github.com/oxalica/rust-overlay/archive/master.tar.gz"
+        "url": "https://github.com/oxalica/rust-overlay/archive/19e0e6c951a7a8a7d3232c64e58d26b89df44c60.tar.gz"
       }
     }
   },

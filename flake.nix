@@ -2,10 +2,12 @@
   description = "Celine — a Telegram profile companion";
 
   inputs = {
-    nixpkgs.url = "https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz";
-    nixpkgs-darwin.url = "https://github.com/NixOS/nixpkgs/archive/nixpkgs-26.05-darwin.tar.gz";
+    # Archive URLs must use commits: branch archives can change without updating flake.lock.
+    # To update an input, replace its revision and run nix flake lock.
+    nixpkgs.url = "https://github.com/NixOS/nixpkgs/archive/6dadaf4375be35033e1c84395adbd53ff5fded96.tar.gz"; # nixpkgs-unstable
+    nixpkgs-darwin.url = "https://github.com/NixOS/nixpkgs/archive/d70a468dc082082bedc027275b3b49ac7007c938.tar.gz"; # nixpkgs-26.05-darwin
     rust-overlay = {
-      url = "https://github.com/oxalica/rust-overlay/archive/master.tar.gz";
+      url = "https://github.com/oxalica/rust-overlay/archive/19e0e6c951a7a8a7d3232c64e58d26b89df44c60.tar.gz"; # master
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
