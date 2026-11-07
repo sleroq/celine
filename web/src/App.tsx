@@ -568,7 +568,6 @@ function Photos(
                     event.currentTarget.value = "";
                 }}
             />
-            <p class="hint">{t("photoUploadHint")}</p>
             <Show when={uploading()}>
                 <p role="status">{t("savingPhotos")}</p>
             </Show>
@@ -629,14 +628,9 @@ function Photos(
                     />
                 )}
             </Show>
-            <details
+            <div
                 id="photo-browser"
                 class="photo-browser"
-                open={pickerOpen()}
-                onToggle={(event) => {
-                    const open = event.currentTarget.open;
-                    setPickerOpen(open);
-                }}
                 onKeyDown={(event) => {
                     if (event.key === "Escape" && pickerOpen()) {
                         event.preventDefault();
@@ -644,66 +638,88 @@ function Photos(
                     }
                 }}
             >
-                <summary
-                    ref={(element) => {
-                        pickerSummary = element;
-                    }}
-                >
-                    {t("selectExistingPhotos")}
-                </summary>
-                <div
-                    class="photo-history"
-                    role="region"
-                    aria-label={t("telegramProfilePhotos")}
-                    aria-busy={props.photoCache.status === "refreshing" ? "true" : "false"}
-                >
-                    <div class="flex flex-wrap items-center gap-2">
-                        <p class="hint" role="status">
-                            {t(
-                                props.photoCache.status === "refreshing"
-                                    ? "photoCacheRefreshing"
-                                    : props.photoCache.status === "error"
-                                      ? "photoCacheError"
-                                      : "photoCacheReady",
-                            )}
-                        </p>
-                        <Button
-                            variant="secondary"
-                            disabled={
-                                refreshingHistory() || props.photoCache.status === "refreshing"
-                            }
-                            onClick={() => void refreshHistory()}
-                        >
-                            {t("refreshPhotoCache")}
-                        </Button>
-                    </div>
-                    <Show
-                        when={props.photoCache.photos.length}
-                        fallback={
-                            <Show when={props.photoCache.status === "ready"}>
-                                <p class="hint">{t("noTelegramPhotos")}</p>
-                            </Show>
-                        }
+                <div class="flex items-center gap-2">
+                    <details
+                        open={pickerOpen()}
+                        onToggle={(event) => setPickerOpen(event.currentTarget.open)}
                     >
-                        <div class="photo-choices">
-                            <For each={props.photoCache.photos.map((photo) => photo.id)}>
-                                {(id, index) => (
-                                    <PhotoChoice
-                                        url={props.api.photoHistoryUrl(id)}
-                                        label={t("includeTelegramPhoto", { number: index() + 1 })}
-                                        checked={props.photos.some(
-                                            (item) => item.telegram_id === id,
-                                        )}
-                                        disabled={props.busy || selecting()}
-                                        toggle={() => void togglePhoto(id)}
-                                    />
-                                )}
-                            </For>
-                        </div>
-                    </Show>
+                        <summary
+                            aria-controls="photo-history"
+                            ref={(element) => {
+                                pickerSummary = element;
+                            }}
+                        >
+                            {t("selectExistingPhotos")}
+                        </summary>
+                    </details>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t("refreshPhotoCache")}
+                        title={t("refreshPhotoCache")}
+                        disabled={refreshingHistory() || props.photoCache.status === "refreshing"}
+                        onClick={() => void refreshHistory()}
+                    >
+                        <svg
+                            aria-hidden="true"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M20 11a8 8 0 0 0-14-5L4 8m0-4v4h4M4 13a8 8 0 0 0 14 5l2-2m0 4v-4h-4" />
+                        </svg>
+                    </Button>
                 </div>
-                <p class="hint">{t("photoSelectionHint")}</p>
-            </details>
+                <Show when={pickerOpen()}>
+                    <div
+                        id="photo-history"
+                        class="photo-history"
+                        role="region"
+                        aria-label={t("telegramProfilePhotos")}
+                        aria-busy={props.photoCache.status === "refreshing" ? "true" : "false"}
+                    >
+                        <Show when={props.photoCache.status !== "ready"}>
+                            <p class="hint" role="status">
+                                {t(
+                                    props.photoCache.status === "refreshing"
+                                        ? "photoCacheRefreshing"
+                                        : "photoCacheError",
+                                )}
+                            </p>
+                        </Show>
+                        <Show
+                            when={props.photoCache.photos.length}
+                            fallback={
+                                <Show when={props.photoCache.status === "ready"}>
+                                    <p class="hint">{t("noTelegramPhotos")}</p>
+                                </Show>
+                            }
+                        >
+                            <div class="photo-choices">
+                                <For each={props.photoCache.photos.map((photo) => photo.id)}>
+                                    {(id, index) => (
+                                        <PhotoChoice
+                                            url={props.api.photoHistoryUrl(id)}
+                                            label={t("includeTelegramPhoto", {
+                                                number: index() + 1,
+                                            })}
+                                            checked={props.photos.some(
+                                                (item) => item.telegram_id === id,
+                                            )}
+                                            disabled={props.busy || selecting()}
+                                            toggle={() => void togglePhoto(id)}
+                                        />
+                                    )}
+                                </For>
+                            </div>
+                        </Show>
+                    </div>
+                    <p class="hint">{t("photoSelectionHint")}</p>
+                </Show>
+            </div>
         </section>
     );
 }

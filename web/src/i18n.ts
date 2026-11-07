@@ -23,8 +23,6 @@ const en = {
     emojiStatus: "Emoji status",
     cannotLoadPhotos: "Cannot load Telegram photos.",
     uploadPhotos: "Upload photos",
-    photoUploadHint:
-        "Drag photos here or upload JPEG/PNG, 160–4096 px, up to 10 MiB. Center-cropped to a square.",
     savingPhotos: "Saving photos…",
     photoStatusLegend: "Photo match status",
     photoReusable: "Reuse Telegram photo",
@@ -35,7 +33,6 @@ const en = {
     photoCacheRefreshing: "Refreshing Telegram photo cache… You can still add local images.",
     photoCacheError:
         "Could not refresh Telegram photo cache. Showing locally cached photos; unmatched photos are not checked.",
-    photoCacheReady: "Locally cached Telegram photos",
     refreshPhotoCache: "Refresh cache",
     selectExistingPhotos: "Select existing photos",
     telegramProfilePhotos: "Telegram profile photos",
@@ -149,8 +146,6 @@ const ru: Catalog = {
     emojiStatus: "Эмодзи-статус",
     cannotLoadPhotos: "Не удалось загрузить фото из Telegram.",
     uploadPhotos: "Загрузить фото",
-    photoUploadHint:
-        "Перетащите фото сюда или загрузите JPEG/PNG, 160–4096 пикс., до 10 МиБ. Фото будет обрезано до квадрата по центру.",
     savingPhotos: "Сохраняем фото…",
     photoStatusLegend: "Состояние совпадения фото",
     photoReusable: "Использовать фото Telegram",
@@ -161,7 +156,6 @@ const ru: Catalog = {
     photoCacheRefreshing: "Обновляем кеш фото Telegram… Можно добавлять локальные изображения.",
     photoCacheError:
         "Не удалось обновить кеш фото Telegram. Показаны локальные копии; несовпавшие фото не проверены.",
-    photoCacheReady: "Локальный кеш фото Telegram",
     refreshPhotoCache: "Обновить кеш",
     selectExistingPhotos: "Выбрать существующие фото",
     telegramProfilePhotos: "Фото профиля в Telegram",
@@ -273,8 +267,6 @@ const uk: Catalog = {
     emojiStatus: "Емодзі-статус",
     cannotLoadPhotos: "Не вдалося завантажити фото з Telegram.",
     uploadPhotos: "Завантажити фото",
-    photoUploadHint:
-        "Перетягніть фото сюди або завантажте JPEG/PNG, 160–4096 пікс., до 10 МіБ. Фото буде обрізано до квадрата по центру.",
     savingPhotos: "Зберігаємо фото…",
     photoStatusLegend: "Стан збігу фото",
     photoReusable: "Використати фото Telegram",
@@ -285,7 +277,6 @@ const uk: Catalog = {
     photoCacheRefreshing: "Оновлюємо кеш фото Telegram… Можна додавати локальні зображення.",
     photoCacheError:
         "Не вдалося оновити кеш фото Telegram. Показано локальні копії; фото без збігів не перевірено.",
-    photoCacheReady: "Локальний кеш фото Telegram",
     refreshPhotoCache: "Оновити кеш",
     selectExistingPhotos: "Вибрати наявні фото",
     telegramProfilePhotos: "Фото профілю в Telegram",
