@@ -29,7 +29,11 @@ export type State = {
         message_info?: MessageInfo | null;
     };
     photos: Photo[];
-    photo_cache: { status: "refreshing" | "ready" | "error"; photos: { id: string }[] };
+    photo_cache: {
+        status: "refreshing" | "ready" | "error";
+        photos: { id: string }[];
+        recovery: Record<string, { duplicate_of: string | null; can_upload: boolean }>;
+    };
     settings: Settings;
     emoji_settings: Settings;
     applied_settings: Settings | null;
@@ -67,7 +71,8 @@ export type EmojiChoice = {
     id: string;
     label: string;
     source: string;
-    source_kind?: "recent" | "default" | "pack" | "search" | null;
+    source_kind?: "recent" | "default" | "pack" | "search" | "collectible" | null;
+    document_id?: string | null;
     thumbnail_url?: string;
     text_color?: boolean;
 };
@@ -109,6 +114,8 @@ export function accountApi(id: string) {
         selectedPhotoUrl: (photo: Pick<Photo, "id" | "crop">) =>
             `${photoUrl(photo.id)}?crop=${encodeURIComponent(JSON.stringify(photo.crop ?? null))}`,
         originalPhotoUrl: (id: string) => `${photoUrl(id)}/original`,
+        reuploadPhoto: (id: string) =>
+            createRequest(base)(`photos/${encodeURIComponent(id)}/reupload`, "POST"),
         saveCrop: (id: string, crop: Crop | null) =>
             createRequest(base)(`photos/${encodeURIComponent(id)}/crop`, "PUT", { crop }),
         emojiMediaUrl: (documentId: string) =>

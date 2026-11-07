@@ -132,20 +132,33 @@ impl PhotoCache {
         jpeg: &[u8],
         available: impl Fn(&str) -> bool,
     ) -> Result<Option<String>> {
-        let candidate = Fingerprint::decode(jpeg)?;
-        for id in self.photos() {
-            if available(&id)
-                && self
-                    .cached
-                    .get(&id)
+        Ok(self.matches(jpeg)?.into_iter().find(|id| available(id)))
+    }
+
+    pub fn matches(&self, jpeg: &[u8]) -> Result<Vec<String>> {
+        Ok(self.matching_fingerprint(&Fingerprint::decode(jpeg)?))
+    }
+
+    // Old cached images remain usable even when their ID leaves the history.
+    // Their fingerprint was validated on open/store; polling need not decode again.
+    pub fn cached_matches(&self, id: &str) -> Option<Vec<String>> {
+        let fingerprint = self.cached.get(id)?;
+        self.image_path(id)
+            .is_file()
+            .then(|| self.matching_fingerprint(fingerprint))
+    }
+
+    fn matching_fingerprint(&self, candidate: &Fingerprint) -> Vec<String> {
+        self.history
+            .iter()
+            .flatten()
+            .filter(|id| {
+                self.cached
+                    .get(*id)
                     .is_some_and(|photo| candidate.is_close(photo))
-            {
-                return Ok(Some(id));
-            }
-        }
-        // None only means no cached match; callers must consult complete() before
-        // interpreting it as absence from the full Telegram history.
-        Ok(None)
+            })
+            .cloned()
+            .collect()
     }
 
     fn image_path(&self, id: &str) -> PathBuf {
@@ -178,6 +191,24 @@ mod tests {
             .encode_image(&image)
             .unwrap();
         bytes
+    }
+
+    #[test]
+    fn cached_matching_retains_old_fingerprints_and_checks_file_availability() {
+        let account = tempfile::tempdir().unwrap();
+        let mut cache = PhotoCache::open(account.path()).unwrap();
+        let bytes = jpeg();
+        cache.set_history(vec!["1".into()]).unwrap();
+        cache.store("1", &bytes).unwrap();
+        cache.set_history(vec!["2".into()]).unwrap();
+        cache.store("2", &bytes).unwrap();
+        assert_eq!(cache.cached_matches("1"), Some(vec!["2".into()]));
+        let mut cache = PhotoCache::open(account.path()).unwrap();
+        assert_eq!(cache.cached_matches("1"), Some(vec!["2".into()]));
+        cache.set_history(vec![]).unwrap();
+        assert_eq!(cache.cached_matches("1"), Some(vec![]));
+        fs::remove_file(cache.image_path("1")).unwrap();
+        assert!(cache.cached_matches("1").is_none());
     }
 
     #[test]

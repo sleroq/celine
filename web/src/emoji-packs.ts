@@ -1,4 +1,4 @@
-import { createSignal, createStore, reconcile } from "solid-js";
+import { createSignal, createStore, reconcile, untrack } from "solid-js";
 import { RequestError } from "./api";
 import type { AccountApi, EmojiChoice, Emojis } from "./api";
 import { t } from "./i18n";
@@ -11,6 +11,29 @@ export function createEmojiPacks(api: AccountApi) {
         sets: Emojis["sets"];
         packs: Record<string, Pack | undefined>;
     }>({ sets: [], packs: {} });
+    let indexedPacks: (EmojiChoice[] | undefined)[] = [];
+    let choicesById = new Map<string, EmojiChoice>();
+
+    function find(id: string) {
+        const packs = Object.values(catalog.packs).map((pack) => pack?.choices);
+        if (
+            packs.length !== indexedPacks.length ||
+            packs.some((choices, index) => choices !== indexedPacks[index])
+        ) {
+            indexedPacks = packs;
+            // Track pack replacements, not every immutable ID indexed.
+            choicesById = untrack(() => {
+                const choices = new Map<string, EmojiChoice>();
+                for (const pack of packs) {
+                    for (const choice of pack ?? []) {
+                        if (!choices.has(choice.id)) choices.set(choice.id, choice);
+                    }
+                }
+                return choices;
+            });
+        }
+        return choicesById.get(id);
+    }
 
     async function select(id = activeId()) {
         setActiveId(id);
@@ -54,14 +77,21 @@ export function createEmojiPacks(api: AccountApi) {
             const choices = catalog.packs[activeId()]?.choices;
             if (!choices) return [];
             if (activeId()) return [{ kind: "pack" as const, choices }];
+            const collectibles = choices.filter((emoji) => emoji.source_kind === "collectible");
             return [
                 {
                     kind: "recent" as const,
                     choices: choices.filter((emoji) => emoji.source_kind === "recent"),
                 },
+                ...(collectibles.length
+                    ? [{ kind: "collectible" as const, choices: collectibles }]
+                    : []),
                 {
                     kind: "default" as const,
-                    choices: choices.filter((emoji) => emoji.source_kind !== "recent"),
+                    choices: choices.filter(
+                        (emoji) =>
+                            emoji.source_kind !== "recent" && emoji.source_kind !== "collectible",
+                    ),
                 },
             ];
         },
@@ -72,11 +102,6 @@ export function createEmojiPacks(api: AccountApi) {
             return catalog.sets.find((set) => set.id === activeId())?.count ?? 24;
         },
         select,
-        find(id: string) {
-            for (const pack of Object.values(catalog.packs)) {
-                const choice = pack?.choices?.find((emoji) => emoji.id === id);
-                if (choice) return choice;
-            }
-        },
+        find,
     };
 }

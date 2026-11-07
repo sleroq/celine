@@ -41,12 +41,15 @@ pub enum EmojiSource {
     Default,
     Pack,
     Search,
+    Collectible,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EmojiChoice {
-    // Decimal strings preserve Telegram's 64-bit IDs in JavaScript.
+    // Strings preserve Telegram's 64-bit IDs in JavaScript.
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_id: Option<String>,
     pub label: String,
     pub source: String,
     #[serde(default)]
@@ -718,7 +721,7 @@ impl Telegram {
         Ok((bytes, content_type))
     }
 
-    pub async fn set_emoji_status(&mut self, id: i64) -> Result<(), TelegramError> {
+    pub async fn set_emoji_status(&mut self, id: &str) -> Result<(), TelegramError> {
         self.require_available()?;
         self.require_authorized()?;
         // Check Premium against Telegram now, not a saved local entitlement.
@@ -734,7 +737,7 @@ impl Telegram {
             .connection
             .client()
             .invoke(&tl::functions::account::UpdateEmojiStatus {
-                emoji_status: permanent_emoji_status(id),
+                emoji_status: selected_emoji_status(id)?,
             })
             .await
             .map_err(|error| self.handle_error(error))?;
@@ -829,13 +832,61 @@ impl Telegram {
                 }
             }
         }
-        Ok(entries
+        let mut choices: Vec<_> = entries
             .into_iter()
             .filter_map(|(id, source, source_kind)| {
                 documents.remove(&id).map(|document| {
                     let mut choice = self.emoji_choice(document, &source);
                     choice.source_kind = Some(source_kind);
                     choice
+                })
+            })
+            .collect();
+        choices.extend(self.collectible_choices().await?);
+        Ok(choices)
+    }
+
+    async fn collectible_choices(&mut self) -> Result<Vec<EmojiChoice>, TelegramError> {
+        let statuses = self
+            .connection
+            .client()
+            .invoke(&tl::functions::account::GetCollectibleEmojiStatuses { hash: 0 })
+            .await
+            .map_err(|error| self.handle_error(error))?;
+        let tl::enums::account::EmojiStatuses::Statuses(statuses) = statuses else {
+            return Ok(Vec::new());
+        };
+        let statuses: Vec<_> = statuses
+            .statuses
+            .into_iter()
+            .filter_map(|status| match status {
+                tl::enums::EmojiStatus::Collectible(status) => Some(status),
+                _ => None,
+            })
+            .collect();
+        let mut documents = HashMap::new();
+        for chunk in statuses.chunks(100) {
+            let result = self
+                .connection
+                .client()
+                .invoke(&tl::functions::messages::GetCustomEmojiDocuments {
+                    document_id: chunk.iter().map(|status| status.document_id).collect(),
+                })
+                .await
+                .map_err(|error| self.handle_error(error))?;
+            for document in result {
+                if let tl::enums::Document::Document(document) = document {
+                    documents.insert(document.id, document);
+                }
+            }
+        }
+        Ok(statuses
+            .into_iter()
+            .filter_map(|status| {
+                // Gifts can share model art; keep the document available for every gift.
+                documents.get(&status.document_id).cloned().map(|document| {
+                    let choice = self.emoji_choice(document, "Collectible");
+                    collectible_choice(&status, choice)
                 })
             })
             .collect())
@@ -1264,6 +1315,7 @@ impl Telegram {
         self.documents.insert(id, document);
         EmojiChoice {
             id: id.to_string(),
+            document_id: None,
             label,
             source: source.into(),
             source_kind: Some(EmojiSource::Pack),
@@ -1362,6 +1414,36 @@ fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn collectible_choice(
+    status: &tl::types::EmojiStatusCollectible,
+    mut choice: EmojiChoice,
+) -> EmojiChoice {
+    choice.id = format!("collectible:{}", status.collectible_id);
+    choice.document_id = Some(status.document_id.to_string());
+    choice.label = format!("{} ({})", status.title, status.slug);
+    choice.source_kind = Some(EmojiSource::Collectible);
+    choice
+}
+
+fn selected_emoji_status(id: &str) -> Result<tl::enums::EmojiStatus, TelegramError> {
+    let invalid = || {
+        TelegramError::message(
+            "rotation.emoji_invalid",
+            "Invalid saved emoji. Reload the emoji catalog and select it again.",
+        )
+    };
+    if let Some(id) = id.strip_prefix("collectible:") {
+        Ok(tl::enums::EmojiStatus::InputEmojiStatusCollectible(
+            tl::types::InputEmojiStatusCollectible {
+                collectible_id: id.parse().map_err(|_| invalid())?,
+                until: None,
+            },
+        ))
+    } else {
+        Ok(permanent_emoji_status(id.parse().map_err(|_| invalid())?))
+    }
 }
 
 fn permanent_emoji_status(id: i64) -> tl::enums::EmojiStatus {
@@ -1767,6 +1849,71 @@ mod tests {
         .unwrap();
         assert!(legacy.source_kind.is_none(), "never classify saved text");
         assert!(old.thumbnail_url.is_none());
+    }
+
+    #[tokio::test]
+    async fn collectibles_keep_identity_when_model_art_is_shared() {
+        let (_dir, mut telegram) = offline_telegram().await;
+        let mut status = tl::types::EmojiStatusCollectible {
+            collectible_id: i64::MAX,
+            document_id: 42,
+            title: "Gift".into(),
+            slug: "Gift-1".into(),
+            pattern_document_id: 43,
+            center_color: 0,
+            edge_color: 0,
+            pattern_color: 0,
+            text_color: 0,
+            until: None,
+        };
+        let first = collectible_choice(
+            &status,
+            telegram.emoji_choice(emoji_document(42, "image/webp"), "Collectible"),
+        );
+        status.collectible_id -= 1;
+        status.slug = "Gift-2".into();
+        let second = collectible_choice(
+            &status,
+            telegram.emoji_choice(emoji_document(42, "image/webp"), "Collectible"),
+        );
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.label, "Gift (Gift-1)");
+        assert_eq!(second.label, "Gift (Gift-2)");
+        assert_eq!(first.document_id, second.document_id);
+        assert_eq!(first.document_id.as_deref(), Some("42"));
+        let value = serde_json::to_value(&first).unwrap();
+        assert_eq!(value["source_kind"], "collectible");
+        let saved: EmojiChoice = serde_json::from_value(value).unwrap();
+        let tl::enums::EmojiStatus::InputEmojiStatusCollectible(input) =
+            selected_emoji_status(&saved.id).unwrap()
+        else {
+            panic!("collectible protocol required")
+        };
+        assert_eq!(input.collectible_id, i64::MAX);
+        assert!(input.until.is_none());
+        let normal = telegram.emoji_choice(emoji_document(42, "image/webp"), "Recent");
+        assert!(
+            serde_json::to_value(normal)
+                .unwrap()
+                .get("document_id")
+                .is_none()
+        );
+        let tl::enums::EmojiStatus::Status(input) = selected_emoji_status("42").unwrap() else {
+            panic!("ordinary protocol required")
+        };
+        assert_eq!(input.document_id, 42);
+        assert!(input.until.is_none());
+        assert!(selected_emoji_status("collectible:not-a-number").is_err());
+        assert!(selected_emoji_status("not-a-number").is_err());
+        let recent =
+            tl::enums::account::EmojiStatuses::Statuses(tl::types::account::EmojiStatuses {
+                hash: 0,
+                statuses: vec![
+                    tl::enums::EmojiStatus::Collectible(status),
+                    permanent_emoji_status(42),
+                ],
+            });
+        assert_eq!(status_document_ids(recent), vec![42]);
     }
 
     fn rpc_error(code: i32, name: &str) -> InvocationError {

@@ -99,6 +99,13 @@ pub enum PhotoCacheStatus {
 pub struct PhotoCacheView {
     pub status: PhotoCacheStatus,
     pub photos: Vec<HistoryPhoto>,
+    pub recovery: std::collections::HashMap<String, PhotoRecovery>,
+}
+
+#[derive(Serialize)]
+pub struct PhotoRecovery {
+    pub duplicate_of: Option<String>,
+    pub can_upload: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -187,7 +194,9 @@ impl App {
     }
     pub async fn state(&self) -> State {
         let auth = self.auth.read().await.clone();
-        let library = self.repository.lock().await.data.clone();
+        let photo_cache = self.photo_cache.lock().await;
+        let repository = self.repository.lock().await;
+        let library = repository.data.clone();
         let selected_emoji_ids = library
             .selected_emojis
             .iter()
@@ -200,7 +209,13 @@ impl App {
             .clone()
             .or(self.photo_error.read().await.clone())
             .or(self.emoji_error.read().await.clone());
-        let photo_cache = self.photo_cache.lock().await;
+        let recovery = if *self.photo_cache_status.read().await == PhotoCacheStatus::Ready
+            && photo_cache.complete()
+        {
+            Self::photo_recovery(&photo_cache, &repository)
+        } else {
+            Default::default()
+        };
         let photos = photo_cache
             .available()
             .into_iter()
@@ -212,6 +227,7 @@ impl App {
             photo_cache: PhotoCacheView {
                 status: *self.photo_cache_status.read().await,
                 photos,
+                recovery,
             },
             current_photo_id: library
                 .applied_settings
@@ -366,6 +382,9 @@ impl App {
     async fn match_local_photos(&self) -> Result<()> {
         let cache = self.photo_cache.lock().await;
         let mut repository = self.repository.lock().await;
+        if !cache.complete() {
+            return Ok(());
+        }
         let ids = cache.photos();
         let mut used: std::collections::HashSet<String> = repository
             .data
@@ -387,16 +406,14 @@ impl App {
                 }
                 continue;
             }
-            let path = repository.photo_path(&photo.id)?;
-            let bytes = match std::fs::read(path) {
-                Ok(bytes) => bytes,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error.into()),
+            let Some(matches) = Self::recovery_matches(&cache, &repository, photo) else {
+                continue;
             };
-            let matched = cache.matching(&bytes, |id| !used.contains(id))?;
+            let matched = matches.into_iter().find(|id| !used.contains(id));
             if let Some(id) = &matched {
                 used.insert(id.clone());
             }
+            let matched = matched.or_else(|| photo.telegram_id.clone());
             if photo.telegram_id != matched || !photo.history_checked {
                 changes.push((photo.id.clone(), matched));
             }
@@ -412,8 +429,128 @@ impl App {
                 Ok(())
             })?;
         }
-        *self.photo_cache_status.write().await = PhotoCacheStatus::Ready;
         Ok(())
+    }
+
+    fn recovery_matches(
+        cache: &PhotoCache,
+        repository: &Repository,
+        photo: &Photo,
+    ) -> Option<Vec<String>> {
+        repository
+            .photo_path(&photo.id)
+            .ok()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| cache.matches(&bytes).ok())
+            .or_else(|| {
+                photo
+                    .telegram_id
+                    .as_deref()
+                    .and_then(|id| cache.cached_matches(id))
+            })
+    }
+
+    fn photo_recovery(
+        cache: &PhotoCache,
+        repository: &Repository,
+    ) -> std::collections::HashMap<String, PhotoRecovery> {
+        let ids = cache.photos();
+        repository
+            .data
+            .photos
+            .iter()
+            .filter_map(|photo| {
+                let id = photo.telegram_id.as_ref()?;
+                if ids.contains(id) {
+                    return None;
+                }
+                let matches = Self::recovery_matches(cache, repository, photo);
+                let matched = matches.as_ref().and_then(|matches| {
+                    matches
+                        .iter()
+                        .find(|id| {
+                            !repository
+                                .data
+                                .photos
+                                .iter()
+                                .any(|other| other.telegram_id.as_ref() == Some(id))
+                        })
+                        .or_else(|| matches.first())
+                });
+                let duplicate_of = matched.and_then(|id| {
+                    repository
+                        .data
+                        .photos
+                        .iter()
+                        .find(|other| {
+                            other.id != photo.id && other.telegram_id.as_ref() == Some(id)
+                        })
+                        .map(|other| other.id.clone())
+                });
+                Some((
+                    photo.id.clone(),
+                    PhotoRecovery {
+                        duplicate_of,
+                        can_upload: matches.as_ref().is_some_and(|matches| matches.is_empty()),
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    pub async fn remove_photo(&self, id: &str) -> Result<()> {
+        {
+            let _cache = self.photo_cache.lock().await;
+            self.repository.lock().await.remove_photo(id)?;
+        }
+        let ready = *self.photo_cache_status.read().await == PhotoCacheStatus::Ready;
+        if ready && let Err(error) = self.match_local_photos().await {
+            tracing::warn!(
+                code = MessageInfo::from_error(&error).code,
+                "Photo deleted; link reconciliation failed, requesting refresh"
+            );
+            self.refresh_photo_history().await;
+        }
+        Ok(())
+    }
+
+    pub async fn reupload_photo(&self, id: &str) -> Result<()> {
+        let cache = self.photo_cache.lock().await;
+        anyhow::ensure!(
+            *self.photo_cache_status.read().await == PhotoCacheStatus::Ready && cache.complete(),
+            Message::new(
+                "photo.history_not_ready",
+                "Photo history is not ready. Refresh it before recovering this photo."
+            )
+        );
+        let mut repository = self.repository.lock().await;
+        let photo = repository
+            .data
+            .photos
+            .iter()
+            .find(|photo| photo.id == id)
+            .context(Message::new("photo.not_found", "Photo not found."))?;
+        let recovery = Self::photo_recovery(&cache, &repository);
+        let entry = recovery.get(id).context(Message::new(
+            "photo.recovery_changed",
+            "Photo is no longer awaiting recovery. Refresh the photo list.",
+        ))?;
+        anyhow::ensure!(
+            entry.duplicate_of.is_none(),
+            Message::new(
+                "photo.recovery_duplicate",
+                "This photo is already selected. Remove the duplicate instead."
+            )
+        );
+        anyhow::ensure!(
+            entry.can_upload,
+            Message::new(
+                "photo.recovery_unavailable",
+                "This photo cannot be prepared for upload. Its bytes are missing or it can already be reused from history."
+            )
+        );
+        let cached = photo.telegram_id.as_deref().and_then(|id| cache.image(id));
+        repository.prepare_photo_reupload(id, cached.as_deref())
     }
 
     pub async fn match_cropped_photo(&self, id: &str) -> Result<()> {
@@ -519,6 +656,7 @@ impl App {
                         .map_err(storage_error)?;
                 } else {
                     self.match_local_photos().await.map_err(storage_error)?;
+                    *self.photo_cache_status.write().await = PhotoCacheStatus::Ready;
                     *sync = PhotoCacheSync::Ready;
                     tracing::info!("Photo cache refresh completed");
                 }
@@ -902,8 +1040,20 @@ impl App {
         photo: &Photo,
     ) -> Result<bool, TelegramError> {
         if let Some(id) = &photo.telegram_id {
+            {
+                let cache = self.photo_cache.lock().await;
+                if *self.photo_cache_status.read().await == PhotoCacheStatus::Ready
+                    && cache.complete()
+                    && !cache.photos().contains(id)
+                {
+                    return Ok(false);
+                }
+            }
             tracing::info!(method = "history", "Photo change attempted");
             let result = telegram.use_history_photo(id).await;
+            if matches!(result, Ok(false)) {
+                self.refresh_photo_history().await;
+            }
             if let Ok(applied) = &result {
                 tracing::info!(method = "history", applied, "Photo change completed");
             }
@@ -964,14 +1114,8 @@ impl App {
                 .map_err(storage_error)?;
             id
         };
-        let document_id = id.parse::<i64>().map_err(|_| TelegramError {
-            info: crate::messages::MessageInfo::new("rotation.emoji_invalid"),
-            message: "Invalid saved emoji. Reload the emoji catalog and select it again.".into(),
-            retry_after: None,
-            unauthorized: false,
-        })?;
         tracing::info!("Emoji rotation attempted");
-        telegram.set_emoji_status(document_id).await?;
+        telegram.set_emoji_status(&id).await?;
         self.repository
             .lock()
             .await
@@ -1064,6 +1208,198 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn stale_cached_photos_relink_and_report_duplicates_without_removal() {
+        let (_dir, app) = photo_app(vec![
+            photo("stale", Some("1"), true),
+            photo("current", Some("2"), true),
+        ])
+        .await;
+        let bytes = include_bytes!("../web/public/logo.jpg");
+        {
+            let mut cache = app.photo_cache.lock().await;
+            cache.set_history(vec!["1".into()]).unwrap();
+            cache.store("1", bytes).unwrap();
+            cache.set_history(vec!["2".into()]).unwrap();
+            cache.store("2", bytes).unwrap();
+        }
+        app.match_local_photos().await.unwrap();
+        let state = app.state().await;
+        assert_eq!(state.library.photos.len(), 2);
+        assert_eq!(state.library.photos[0].telegram_id.as_deref(), Some("1"));
+        assert_eq!(
+            state.photo_cache.recovery["stale"].duplicate_of.as_deref(),
+            Some("current")
+        );
+        assert!(app.reupload_photo("stale").await.is_err());
+        app.remove_photo("current").await.unwrap();
+        let state = app.state().await;
+        assert_eq!(state.library.photos[0].telegram_id.as_deref(), Some("2"));
+        assert!(state.photo_cache.recovery.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stale_cached_photo_requires_explicit_reupload_and_usable_bytes() {
+        let (_dir, app) = photo_app(vec![
+            photo("cached", Some("1"), true),
+            photo("missing", Some("3"), true),
+        ])
+        .await;
+        let bytes = include_bytes!("../web/public/logo.jpg");
+        {
+            let mut cache = app.photo_cache.lock().await;
+            cache.set_history(vec!["1".into()]).unwrap();
+            cache.store("1", bytes).unwrap();
+            cache.set_history(vec![]).unwrap();
+        }
+        app.match_local_photos().await.unwrap();
+        let state = app.state().await;
+        assert!(state.photo_cache.recovery["cached"].can_upload);
+        assert!(!state.photo_cache.recovery["missing"].can_upload);
+        let error = app.reupload_photo("missing").await.unwrap_err();
+        assert_eq!(
+            MessageInfo::from_error(&error).code,
+            "photo.recovery_unavailable"
+        );
+        let error = app.reupload_photo("removed").await.unwrap_err();
+        assert_eq!(MessageInfo::from_error(&error).code, "photo.not_found");
+        app.reupload_photo("cached").await.unwrap();
+        let repository = app.repository.lock().await;
+        assert!(repository.data.photos[0].telegram_id.is_none());
+        assert!(repository.data.photos[0].history_checked);
+        assert_eq!(
+            std::fs::read(repository.photo_path("cached").unwrap()).unwrap(),
+            bytes
+        );
+        drop(repository);
+        let error = app.reupload_photo("cached").await.unwrap_err();
+        assert_eq!(
+            MessageInfo::from_error(&error).code,
+            "photo.recovery_changed"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_and_queued_upload_survive_restart() {
+        let (dir, app) = photo_app(vec![photo("cached", Some("1"), true)]).await;
+        {
+            let mut cache = app.photo_cache.lock().await;
+            cache.set_history(vec!["1".into()]).unwrap();
+            cache
+                .store("1", include_bytes!("../web/public/logo.jpg"))
+                .unwrap();
+            cache.set_history(vec![]).unwrap();
+        }
+        drop(app);
+        let app = App::open(dir.path().into(), None).unwrap();
+        app.sync_photo_history_step(
+            &mut FakeHistory(VecDeque::new()),
+            &mut PhotoCacheSync::Images,
+        )
+        .await
+        .unwrap();
+        assert!(app.state().await.photo_cache.recovery["cached"].can_upload);
+        app.reupload_photo("cached").await.unwrap();
+        drop(app);
+        let app = App::open(dir.path().into(), None).unwrap();
+        app.sync_photo_history_step(
+            &mut FakeHistory(VecDeque::new()),
+            &mut PhotoCacheSync::Images,
+        )
+        .await
+        .unwrap();
+        assert!(app.state().await.photo_cache.recovery.is_empty());
+        let mut client = FakePhotos::new([PhotoCall::Upload("2")]);
+        app.rotate_photos_if_due(&mut client).await.unwrap();
+        client.assert_finished();
+        assert_eq!(
+            app.state().await.library.photos[0].telegram_id.as_deref(),
+            Some("2")
+        );
+        assert!(app.photo_cache.lock().await.image("1").is_some());
+    }
+
+    #[tokio::test]
+    async fn unclaimed_match_disables_reupload_and_is_preferred_to_selected_match() {
+        let (_dir, app) = photo_app(vec![
+            photo("stale", Some("1"), true),
+            photo("selected", Some("2"), true),
+        ])
+        .await;
+        {
+            let mut cache = app.photo_cache.lock().await;
+            cache.set_history(vec!["1".into()]).unwrap();
+            cache
+                .store("1", include_bytes!("../web/public/logo.jpg"))
+                .unwrap();
+            cache.set_history(vec!["2".into(), "3".into()]).unwrap();
+            for id in ["2", "3"] {
+                cache
+                    .store(id, include_bytes!("../web/public/logo.jpg"))
+                    .unwrap();
+            }
+        }
+        let state = app.state().await;
+        let recovery = &state.photo_cache.recovery["stale"];
+        assert!(!recovery.can_upload);
+        assert!(recovery.duplicate_of.is_none());
+        let error = app.reupload_photo("stale").await.unwrap_err();
+        assert_eq!(
+            MessageInfo::from_error(&error).code,
+            "photo.recovery_unavailable"
+        );
+        app.match_local_photos().await.unwrap();
+        assert_eq!(
+            app.state().await.library.photos[0].telegram_id.as_deref(),
+            Some("3")
+        );
+    }
+
+    #[tokio::test]
+    async fn ready_absence_skips_history_use_but_unknown_rejection_refreshes() {
+        let (_dir, app) = photo_app(vec![photo("stale", Some("1"), true)]).await;
+        app.photo_cache.lock().await.set_history(vec![]).unwrap();
+        let mut client = FakePhotos::new([]);
+        app.rotate_photos_if_due(&mut client).await.unwrap();
+        client.assert_finished();
+        let (_dir, app) = photo_app(vec![photo("stale", Some("1"), true)]).await;
+        let mut client = FakePhotos::new([PhotoCall::Use("1", Ok(false))]);
+        app.rotate_photos_if_due(&mut client).await.unwrap();
+        client.assert_finished();
+        assert!(*app.photo_cache_status.read().await == PhotoCacheStatus::Refreshing);
+        assert_eq!(
+            app.state().await.library.photos[0].telegram_id.as_deref(),
+            Some("1")
+        );
+    }
+
+    #[tokio::test]
+    async fn reconciliation_does_not_publish_ready_during_requested_refresh() {
+        let (_dir, app) = photo_app(vec![photo("stale", Some("1"), false)]).await;
+        app.refresh_photo_history().await;
+        app.match_local_photos().await.unwrap();
+        assert!(*app.photo_cache_status.read().await == PhotoCacheStatus::Refreshing);
+        assert!(app.photo_cache_refresh.load(Ordering::Acquire));
+        app.remove_photo("stale").await.unwrap();
+        assert!(app.state().await.library.photos.is_empty());
+        assert!(*app.photo_cache_status.read().await == PhotoCacheStatus::Refreshing);
+        assert!(app.photo_cache_refresh.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn incomplete_history_cannot_report_absence_or_prepare_upload() {
+        let (_dir, app) = photo_app(vec![photo("stale", Some("1"), false)]).await;
+        app.photo_cache
+            .lock()
+            .await
+            .set_history(vec!["2".into()])
+            .unwrap();
+        app.match_local_photos().await.unwrap();
+        assert!(app.state().await.photo_cache.recovery.is_empty());
+        assert!(!app.state().await.library.photos[0].history_checked);
+        assert!(app.reupload_photo("stale").await.is_err());
+    }
+
     struct TransitioningPhoto {
         app: Arc<App>,
         action: ScheduleAction,
@@ -1101,7 +1437,16 @@ mod tests {
     async fn photo_app(photos: Vec<Photo>) -> (tempfile::TempDir, Arc<App>) {
         let dir = tempfile::tempdir().unwrap();
         let app = App::open(dir.path().into(), None).unwrap();
-        app.photo_cache.lock().await.set_history(vec![]).unwrap();
+        app.photo_cache
+            .lock()
+            .await
+            .set_history(
+                photos
+                    .iter()
+                    .filter_map(|photo| photo.telegram_id.clone())
+                    .collect(),
+            )
+            .unwrap();
         *app.photo_cache_status.write().await = PhotoCacheStatus::Ready;
         app.repository
             .lock()
@@ -1641,7 +1986,12 @@ mod tests {
                     .store("101", include_bytes!("../web/public/logo.jpg"))
                     .unwrap();
             }
-            app.match_local_photos().await.unwrap();
+            app.sync_photo_history_step(
+                &mut FakeHistory(VecDeque::new()),
+                &mut PhotoCacheSync::Images,
+            )
+            .await
+            .unwrap();
             make_photo_due(&app).await;
             let next = if matched {
                 PhotoCall::Use("101", Ok(true))
@@ -1713,6 +2063,7 @@ mod tests {
         app.auth.write().await.premium = true;
         assert!(app.schedule(true, ScheduleAction::Start).await.is_err());
         let choice = EmojiChoice {
+            document_id: None,
             id: "9223372036854775806".into(),
             label: "Star".into(),
             source: "Pack".into(),
@@ -1827,6 +2178,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = App::open(dir.path().into(), None).unwrap();
         let choice = EmojiChoice {
+            document_id: None,
             id: "9223372036854775806".into(),
             label: "Star".into(),
             source: "Installed pack".into(),
@@ -1850,6 +2202,7 @@ mod tests {
         app.auth.write().await.status = "authorized".into();
         app.auth.write().await.premium = true;
         let choice = EmojiChoice {
+            document_id: None,
             id: "1".into(),
             label: "Star".into(),
             source: "Pack".into(),

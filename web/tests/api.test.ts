@@ -50,10 +50,10 @@ describe("rotation requests", () => {
             new Response(null, { status: 204 }),
         );
         const api = accountApi("personal");
-        await api.request("emojis", "PUT", { ids: ["200", "100"] });
+        await api.request("emojis", "PUT", { ids: ["200", "collectible:9223372036854775806"] });
         await api.request("emojis", "PUT", { ids: [] });
         expect(fetch.mock.calls.map(([, options]) => options?.body)).toEqual([
-            JSON.stringify({ ids: ["200", "100"] }),
+            JSON.stringify({ ids: ["200", "collectible:9223372036854775806"] }),
             JSON.stringify({ ids: [] }),
         ]);
     });
@@ -176,6 +176,16 @@ describe("account-scoped requests", () => {
         expect(accountApi("other").selectedPhotoUrl(cropped)).not.toBe(
             api.selectedPhotoUrl(cropped),
         );
+    });
+
+    test("queues a saved photo for upload in the correct account", async () => {
+        const fetch = spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(null, { status: 204 }),
+        );
+        await accountApi("a/b").reuploadPhoto("p/q");
+        expect(
+            fetch.mock.calls.map(([url, options]) => [url, options?.method, options?.body]),
+        ).toEqual([["/api/accounts/a%2Fb/photos/p%2Fq/reupload", "POST", undefined]]);
     });
 
     test("saves and resets crop on the account-scoped photo", async () => {

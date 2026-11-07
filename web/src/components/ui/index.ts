@@ -12,3 +12,4 @@ export {
 } from "./select";
 export { Tabs, TabsContent, TabsIndicator, TabsList, TabsTrigger } from "./tabs";
 export { TextField, TextFieldInput, TextFieldLabel } from "./text-field";
+export { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";

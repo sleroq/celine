@@ -17,6 +17,13 @@ const suggested = {
     source_kind: "default" as const,
     thumbnail_url: "/suggested.png",
 };
+const collectible = {
+    id: "collectible:9223372036854775806",
+    document_id: "900",
+    label: "Snow Globe #1",
+    source: "Collectibles",
+    source_kind: "collectible" as const,
+};
 const leaf = { id: "200", label: "🌿", source: "Nature", thumbnail_url: "/leaf.png" };
 const fire = { id: "300", label: "🔥", source: "Reactions", thumbnail_url: "/fire.png" };
 const catalog = {
@@ -94,6 +101,22 @@ describe("emoji pack browsing", () => {
         ]);
     });
 
+    test("groups collectibles separately and preserves gifts sharing artwork", async () => {
+        const second = { ...collectible, id: "collectible:42", label: "Snow Globe #2" };
+        spyOn(globalThis, "fetch").mockResolvedValue(
+            Response.json({ ...catalog, choices: [recent, collectible, second, suggested] }),
+        );
+        const packs = createEmojiPacks(accountApi("account-a"));
+        await packs.select();
+        expect(packs.groups).toEqual([
+            { kind: "recent", choices: [recent] },
+            { kind: "collectible", choices: [collectible, second] },
+            { kind: "default", choices: [suggested] },
+        ]);
+        expect(packs.find(collectible.id)).toEqual(collectible);
+        expect(packs.find(second.id)).toEqual(second);
+    });
+
     test("deduplicates an in-flight refresh and retries a failed refresh", async () => {
         let respond!: (response: Response) => void;
         const slow = new Promise<Response>((resolve) => {
@@ -150,6 +173,40 @@ describe("emoji pack browsing", () => {
             "/api/accounts/account-a/emojis/sets/3000",
             "/api/accounts/account-a/emojis",
         ]);
+    });
+
+    test("keeps first-match lookup order when a pack refreshes", async () => {
+        let respond!: (response: Response) => void;
+        const pending = new Promise<Response>((resolve) => {
+            respond = resolve;
+        });
+        const duplicate = { ...recent, label: "Pack star" };
+        const refreshed = { ...recent, label: "New star" };
+        spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(Response.json(catalog))
+            .mockResolvedValueOnce(Response.json({ choices: [duplicate] }))
+            .mockReturnValueOnce(pending);
+        const packs = createEmojiPacks(accountApi("account-a"));
+        await packs.select();
+        await packs.select("9000000000");
+        expect(packs.find(recent.id)?.label).toBe(recent.label);
+
+        const refresh = packs.select("");
+        flush();
+        expect(packs.find(recent.id)?.label).toBe(duplicate.label);
+        respond(Response.json({ ...catalog, choices: [refreshed] }));
+        await refresh;
+        expect(packs.find(recent.id)?.label).toBe(refreshed.label);
+    });
+
+    test("updates reactive lookups when packs load and refresh", () => {
+        // Bun otherwise resolves Solid's non-reactive server runtime.
+        const result = Bun.spawnSync(
+            [process.execPath, "--conditions=browser", "run", "fixtures/emoji-packs-reactivity.ts"],
+            { cwd: import.meta.dir },
+        );
+        expect(result.stderr.toString()).toBe("");
+        expect(result.exitCode).toBe(0);
     });
 
     test("caches an empty pack instead of refetching it", async () => {

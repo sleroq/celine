@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 const apiTarget = "http://127.0.0.1:7766";
 
 export default defineConfig({
+    optimizeDeps: { exclude: ["tlottie"] },
     plugins: [tailwindcss(), solid()],
     server: {
         proxy: {

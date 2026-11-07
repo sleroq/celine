@@ -330,6 +330,68 @@ impl Repository {
         }
     }
 
+    pub fn prepare_photo_reupload(&mut self, id: &str, cached: Option<&[u8]>) -> Result<()> {
+        let result = (|| -> Result<()> {
+            let path = self.photo_path(id)?;
+            let local = match fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
+            let usable_local = local
+                .as_ref()
+                .is_some_and(|bytes| crate::photo_match::Fingerprint::decode(bytes).is_ok());
+            let materialized = if usable_local {
+                false
+            } else {
+                let unavailable = || {
+                    Message::new(
+                        "photo.recovery_unavailable",
+                        "This photo cannot be prepared for upload. Its bytes are missing or it can already be reused from history.",
+                    )
+                };
+                let bytes = cached.context(unavailable())?;
+                crate::photo_match::Fingerprint::decode(bytes).context(unavailable())?;
+                let mut preview = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+                std::io::Write::write_all(&mut preview, bytes)?;
+                preview.persist(&path)?;
+                true
+            };
+            if let Err(error) = self.update(|library| {
+                let photo = library
+                    .photos
+                    .iter_mut()
+                    .find(|photo| photo.id == id)
+                    .context("Photo not found")?;
+                photo.telegram_id = None;
+                photo.history_checked = true;
+                Ok(())
+            }) {
+                if materialized {
+                    if let Some(bytes) = local {
+                        let mut preview = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+                        std::io::Write::write_all(&mut preview, &bytes)?;
+                        preview.persist(&path)?;
+                    } else {
+                        fs::remove_file(path)?;
+                    }
+                }
+                return Err(error);
+            }
+            Ok(())
+        })();
+        result.map_err(|error| {
+            if error.downcast_ref::<Message>().is_some() {
+                error
+            } else {
+                error.context(Message::new(
+                    "storage.state_save_failed",
+                    "Could not save changes. Check disk space and permissions, then try again.",
+                ))
+            }
+        })
+    }
+
     pub fn save_crop(&mut self, id: &str, crop: Option<Crop>, original: &[u8]) -> Result<()> {
         let old = self
             .data
@@ -873,6 +935,7 @@ mod tests {
     }
     fn emoji(id: &str) -> EmojiChoice {
         EmojiChoice {
+            document_id: None,
             id: id.into(),
             label: id.into(),
             source: "Test pack".into(),
@@ -881,6 +944,27 @@ mod tests {
             text_color: false,
         }
     }
+    #[test]
+    fn saved_collectibles_with_shared_art_rotate_and_reorder_independently() {
+        let mut first = emoji("collectible:100");
+        first.document_id = Some("42".into());
+        first.source_kind = Some(crate::telegram::EmojiSource::Collectible);
+        let mut second = first.clone();
+        second.id = "collectible:101".into();
+        let mut library = Library::default();
+        library.select_emojis(vec![first.clone(), second.clone(), emoji("42")]);
+        let mut saved: Library =
+            serde_json::from_slice(&serde_json::to_vec(&library).unwrap()).unwrap();
+        assert_eq!(saved.selected_emojis.len(), 3);
+        assert_eq!(saved.next_emoji().unwrap().id, first.id);
+        saved.last_emoji_id = Some(first.id.clone());
+        assert_eq!(saved.next_emoji().unwrap().id, second.id);
+        saved.select_emojis(vec![second.clone(), first.clone(), emoji("42")]);
+        assert_eq!(saved.selected_emojis[0].id, second.id);
+        assert_eq!(saved.selected_emojis[1].id, first.id);
+        assert_eq!(saved.selected_emojis[2].document_id, None);
+    }
+
     #[test]
     fn emoji_ordering_and_random_selection_are_independent() {
         let mut library = Library {
@@ -1327,6 +1411,57 @@ mod tests {
         );
         assert!(repo.data.photos.is_empty());
         assert_eq!(fs::read_dir(dir.path().join("photos")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn reupload_preserves_existing_preview_original_and_crop() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut repo = Repository::open(dir.path().into()).unwrap();
+        let jpeg = include_bytes!("../web/public/logo.jpg");
+        repo.add_upload("a", b"original", jpeg, Some("42".into()), false)
+            .unwrap();
+        let crop = Crop {
+            x: 0.0,
+            y: 0.0,
+            size: 0.5,
+        };
+        repo.update(|library| {
+            library.photos[0].crop = Some(crop.clone());
+            Ok(())
+        })
+        .unwrap();
+        let id = repo.data.photos[0].id.clone();
+        repo.prepare_photo_reupload(&id, Some(b"unusable cached bytes"))
+            .unwrap();
+        assert_eq!(fs::read(repo.photo_path(&id).unwrap()).unwrap(), jpeg);
+        assert_eq!(repo.original(&id).unwrap(), b"original");
+        assert_eq!(repo.data.photos[0].crop, Some(crop));
+        assert!(repo.data.photos[0].telegram_id.is_none());
+        assert!(repo.data.photos[0].history_checked);
+    }
+
+    #[test]
+    fn failed_reupload_state_save_restores_preview_and_link() {
+        for previous in [None, Some(b"old broken preview".as_slice())] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut repo = Repository::open(dir.path().into()).unwrap();
+            repo.add_history_photo("42".into()).unwrap();
+            let id = repo.data.photos[0].id.clone();
+            let path = repo.photo_path(&id).unwrap();
+            if let Some(bytes) = previous {
+                fs::write(&path, bytes).unwrap();
+            }
+            block_state_save(dir.path());
+            let error = repo
+                .prepare_photo_reupload(&id, Some(include_bytes!("../web/public/logo.jpg")))
+                .unwrap_err();
+            assert_eq!(
+                crate::messages::MessageInfo::from_error(&error).code,
+                "storage.state_save_failed"
+            );
+            assert_eq!(repo.data.photos[0].telegram_id.as_deref(), Some("42"));
+            assert_eq!(fs::read(&path).ok().as_deref(), previous);
+        }
     }
 
     #[test]

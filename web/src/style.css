@@ -348,15 +348,28 @@ input[aria-invalid="true"] {
     border-radius: 0.5rem;
     color: var(--ui-foreground);
     background: var(--ui-surface);
+    cursor: pointer;
+}
+@media (hover: hover) {
+    .emoji-add:hover,
+    .photo-add:hover {
+        color: var(--ui-accent);
+        background: var(--ui-muted);
+    }
 }
 .emoji-add[aria-expanded="true"] {
     border: 1px solid var(--ui-accent);
     color: var(--ui-accent);
     background: var(--ui-muted);
 }
+.sortable-list-photo .sortable-trailing {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+}
 .photo-add {
-    width: 80px;
-    height: 80px;
+    width: 64px;
+    height: 64px;
 }
 .emoji-add svg,
 .photo-add svg {
@@ -471,7 +484,8 @@ input[aria-invalid="true"] {
 }
 .emoji-art > img,
 .emoji-art > video,
-.emoji-art > svg {
+.emoji-art > svg,
+.emoji-art > canvas {
     display: block;
     width: 100%;
     height: 100%;
@@ -568,6 +582,10 @@ input[aria-invalid="true"] {
     -webkit-user-select: none;
     user-select: none;
 }
+.sortable-list-photo {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr));
+}
 .sortable-item {
     position: relative;
 }
@@ -584,24 +602,6 @@ input[aria-invalid="true"] {
     text-align: center;
     pointer-events: none;
 }
-.photo-tooltip {
-    inset-inline-start: auto;
-    inset-inline-end: 3px;
-    bottom: 25px;
-    width: max-content;
-    max-width: min(20rem, calc(100vw - 2rem));
-    text-align: start;
-    pointer-events: none;
-    transition: visibility 0s 0s;
-}
-.sortable-handle:has(.photo-badge:hover) ~ .photo-tooltip,
-.sortable-handle:focus-visible ~ .photo-tooltip {
-    visibility: visible;
-    transition-delay: 200ms;
-}
-.sortable-item:has(.photo-badge:hover, .sortable-handle:focus-visible) {
-    z-index: 1;
-}
 .sortable-handle {
     display: grid;
     place-items: center;
@@ -614,6 +614,11 @@ input[aria-invalid="true"] {
     background: var(--ui-surface);
     cursor: grab;
     touch-action: none;
+}
+.sortable-list-photo .sortable-handle {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
 }
 .sortable-list-emoji .sortable-handle {
     width: 48px;
@@ -799,7 +804,7 @@ input[type="number"] {
     visibility: hidden;
 }
 .photo-choice:has(input:checked) img {
-    outline: 3px solid Highlight;
+    outline: 3px solid var(--ui-accent);
     outline-offset: -3px;
 }
 .photo-choice:has(input:focus-visible) {
@@ -871,6 +876,10 @@ input[type="number"] {
     .emoji-choice {
         transform: perspective(220px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
         transition: transform 150ms ease;
+    }
+    .sortable-list-photo .sortable-surface {
+        transform: perspective(220px) rotateX(calc(var(--tilt-x, 0deg) * 0.55))
+            rotateY(calc(var(--tilt-y, 0deg) * 0.55));
     }
 }
 .sortable-item:focus-within .sortable-edit,

@@ -17,8 +17,15 @@ const en = {
         "Thumbnail unavailable. Refresh the emoji catalog to reload previews.",
     "emoji.thumbnail_unavailable": "Thumbnail unavailable.",
     "error.unclassified": "The request failed. Please retry.",
+    "photo.history_not_ready":
+        "Photo history is not ready. Refresh it before recovering this photo.",
     "photo.local_missing": "Local photo is missing. Remove it from selection and upload it again.",
     "photo.not_found": "Photo not found.",
+    "photo.recovery_changed": "This photo no longer needs recovery. Refresh the photo list.",
+    "photo.recovery_duplicate":
+        "This photo matches another selected photo. Remove the duplicate instead.",
+    "photo.recovery_unavailable":
+        "This photo cannot be uploaded. Its saved image is missing or it can already be reused.",
     "photo.profile_unavailable": "Profile photo unavailable.",
     "photo.telegram_not_found": "Telegram photo not found.",
     "request.local_only": "Only same-origin requests to Celine’s loopback address are allowed.",
@@ -113,8 +120,14 @@ const ru = {
         "Миниатюра недоступна. Обновите каталог эмодзи, чтобы перезагрузить превью.",
     "emoji.thumbnail_unavailable": "Миниатюра недоступна.",
     "error.unclassified": "Не удалось выполнить запрос. Повторите попытку.",
+    "photo.history_not_ready":
+        "История фото ещё не готова. Обновите её перед восстановлением фото.",
     "photo.local_missing": "Локальное фото отсутствует. Уберите его из выбора и загрузите снова.",
     "photo.not_found": "Фото не найдено.",
+    "photo.recovery_changed": "Это фото больше не требует восстановления. Обновите список фото.",
+    "photo.recovery_duplicate": "Это фото совпадает с другим выбранным фото. Удалите дубликат.",
+    "photo.recovery_unavailable":
+        "Не удалось подготовить фото к загрузке: сохранённое изображение отсутствует или фото уже можно использовать.",
     "photo.profile_unavailable": "Фото профиля недоступно.",
     "photo.telegram_not_found": "Фото Telegram не найдено.",
     "request.local_only":
@@ -217,8 +230,13 @@ const uk = {
         "Мініатюра недоступна. Оновіть каталог емодзі, щоб перезавантажити прев’ю.",
     "emoji.thumbnail_unavailable": "Мініатюра недоступна.",
     "error.unclassified": "Не вдалося виконати запит. Спробуйте ще раз.",
+    "photo.history_not_ready": "Історія фото ще не готова. Оновіть її перед відновленням фото.",
     "photo.local_missing": "Локальне фото відсутнє. Вилучіть його з вибору та завантажте знову.",
     "photo.not_found": "Фото не знайдено.",
+    "photo.recovery_changed": "Це фото більше не потребує відновлення. Оновіть список фото.",
+    "photo.recovery_duplicate": "Це фото збігається з іншим вибраним фото. Видаліть дублікат.",
+    "photo.recovery_unavailable":
+        "Не вдалося підготувати фото до завантаження: збережене зображення відсутнє або фото вже можна використати.",
     "photo.profile_unavailable": "Фото профілю недоступне.",
     "photo.telegram_not_found": "Фото Telegram не знайдено.",
     "request.local_only": "Дозволено лише запити з того самого джерела до локальної адреси Celine.",

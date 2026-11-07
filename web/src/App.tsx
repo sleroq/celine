@@ -8,6 +8,7 @@ import { createAutosave } from "./autosave";
 import { createEmojiPacks } from "./emoji-packs";
 import { createEmojiSearch } from "./emoji-search";
 import { EmojiMedia } from "./EmojiMedia";
+import { EmojiChoicePreview } from "./EmojiChoicePreview";
 import { PhotoDialog } from "./PhotoDialog";
 import { photoMatchMessage } from "./photo-status";
 import { SortableList } from "./SortableList";
@@ -37,6 +38,9 @@ import {
     TextField,
     TextFieldInput,
     TextFieldLabel,
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
 } from "./components/ui";
 
 type AccountActions = Actions & { api: AccountApi };
@@ -399,6 +403,7 @@ function AccountWorkspace(
                         ]}
                     >
                         <EmojiPicker
+                            active={tab() === "emojis"}
                             api={props.api}
                             notify={props.notify}
                             selected={props.state.selected_emoji_ids}
@@ -529,6 +534,14 @@ function Photos(
         });
     }
 
+    function reupload(id: string) {
+        // oxlint-disable-next-line solid/reactivity -- perform invokes this callback when the action runs; it is not a reactive computation.
+        void props.perform(async () => {
+            await props.autosave.flush();
+            await props.api.reuploadPhoto(id);
+        });
+    }
+
     return (
         <section
             aria-label={t("profilePhotos")}
@@ -577,15 +590,24 @@ function Photos(
                 kind="photo"
                 busy={props.busy}
                 reorder={reorder}
-                items={photos().map((photo) => ({
-                    id: photo.id,
-                    label: photoDisplayName(photo),
-                    imageUrl: props.api.selectedPhotoUrl(photo),
-                    reorderLabel: photo.generated_name ? t("reorderTelegramPhoto") : undefined,
-                    removeLabel: photo.generated_name ? t("removeTelegramPhoto") : undefined,
-                    badge: photoMatchMessage(photo, props.photoCache),
-                    current: photo.id === props.currentPhotoId,
-                }))}
+                items={photos().map((photo, index) => {
+                    const badge = photoMatchMessage(photo, props.photoCache);
+                    return {
+                        id: photo.id,
+                        label: photoDisplayName(photo),
+                        imageUrl: props.api.selectedPhotoUrl(photo),
+                        reorderLabel: photo.generated_name ? t("reorderTelegramPhoto") : undefined,
+                        removeLabel: photo.generated_name ? t("removeTelegramPhoto") : undefined,
+                        badge,
+                        badgeActionLabel:
+                            badge === "photoUnavailable" &&
+                            props.photoCache.recovery[photo.id]?.can_upload
+                                ? t("photoUploadAgainAt", { number: index + 1 })
+                                : undefined,
+                        current: photo.id === props.currentPhotoId,
+                    };
+                })}
+                recover={reupload}
                 edit={(id, button) => {
                     editButton = button;
                     setPhotoDialog({
@@ -657,6 +679,7 @@ function Photos(
                     <Button
                         variant="ghost"
                         size="icon"
+                        class="size-8 min-h-8"
                         aria-label={t("refreshPhotoCache")}
                         title={t("refreshPhotoCache")}
                         disabled={refreshingHistory() || props.photoCache.status === "refreshing"}
@@ -923,16 +946,10 @@ function Rotation(
     }
 
     return (
-        <section aria-labelledby={fieldId("rotation-title")}>
+        <section aria-label={props.target === "photo" ? t("photoRotation") : t("emojiRotation")}>
             <Card class="gap-0 rounded-2xl p-4 sm:p-5">
-                <h2
-                    class="m-0! text-base! font-semibold tracking-tight"
-                    id={fieldId("rotation-title")}
-                >
-                    {props.target === "photo" ? t("photoRotation") : t("emojiRotation")}
-                </h2>
                 <form
-                    class="my-5! grid gap-4!"
+                    class="mt-0! mb-5! grid gap-4!"
                     onSubmit={(event) => {
                         event.preventDefault();
                     }}
@@ -966,7 +983,7 @@ function Rotation(
                         }}
                     >
                         <summary
-                            class="group/summary relative cursor-pointer py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            class="cursor-pointer py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                             aria-label={
                                 settings().jitter_secs == null
                                     ? t("jitterAutomaticLabel")
@@ -975,15 +992,31 @@ function Rotation(
                             aria-describedby={fieldId("jitter-help")}
                         >
                             {t("jitter")}
-                            <span class="group/help ms-1 inline-grid size-5 place-items-center rounded-full bg-surface text-xs text-muted-foreground">
-                                <span aria-hidden="true">?</span>
-                                <span
-                                    class="invisible absolute bottom-full inset-s-0 z-10 w-64 max-w-full rounded-lg bg-foreground px-3 py-2 text-sm font-normal text-background shadow-lg group-focus-visible/summary:visible group-hover/help:visible"
-                                    id={fieldId("jitter-help")}
-                                    role="tooltip"
+                            <Tooltip>
+                                <TooltipTrigger
+                                    as="span"
+                                    role="img"
+                                    tabindex="0"
+                                    aria-label={t("jitter")}
+                                    aria-describedby={fieldId("jitter-help")}
+                                    class="ms-1 inline-grid size-5 place-items-center rounded-full bg-surface text-xs text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                        }
+                                    }}
                                 >
-                                    {t("jitterHelp")}
-                                </span>
+                                    ?
+                                </TooltipTrigger>
+                                <TooltipContent>{t("jitterHelp")}</TooltipContent>
+                            </Tooltip>
+                            <span class="visually-hidden" id={fieldId("jitter-help")}>
+                                {t("jitterHelp")}
                             </span>
                             <span class="ms-3 text-sm font-normal text-muted-foreground">
                                 {settings().jitter_secs == null ? t("automatic") : t("custom")}
@@ -1097,11 +1130,13 @@ function Rotation(
 function emojiSource(emoji: EmojiChoice): string {
     if (emoji.source_kind === "recent") return t("emojiSourceRecent");
     if (emoji.source_kind === "default") return t("emojiSourceDefault");
+    if (emoji.source_kind === "collectible") return t("collectibleEmojiStatuses");
     if (emoji.source_kind === "search") return t("emojiSearchResults");
     return emoji.source;
 }
 
 function EmojiChoices(props: {
+    active: boolean;
     choices: EmojiChoice[];
     api: AccountApi;
     selected: string[];
@@ -1114,7 +1149,11 @@ function EmojiChoices(props: {
                 {(emoji) => (
                     <label
                         class="emoji-choice"
-                        title={emojiSource(emoji)}
+                        title={
+                            emoji.source_kind === "collectible"
+                                ? emojiDisplayName(emoji.label)
+                                : emojiSource(emoji)
+                        }
                         onPointerMove={tilt}
                         onPointerLeave={resetTilt}
                         onPointerCancel={resetTilt}
@@ -1126,13 +1165,12 @@ function EmojiChoices(props: {
                             disabled={props.busy}
                             onChange={() => props.toggle(emoji.id)}
                         />
-                        <span class="emoji-preview" aria-hidden="true">
-                            <EmojiMedia
-                                url={props.api.emojiMediaUrl(emoji.id)}
-                                label={emojiDisplayName(emoji.label)}
-                                textColor={emoji.text_color}
-                            />
-                        </span>
+                        <EmojiChoicePreview
+                            active={props.active}
+                            url={props.api.emojiMediaUrl(emoji.document_id ?? emoji.id)}
+                            label={emojiDisplayName(emoji.label)}
+                            textColor={emoji.text_color}
+                        />
                     </label>
                 )}
             </For>
@@ -1165,6 +1203,7 @@ function EmojiSearchMore(props: { loadMore: () => void }) {
 
 function EmojiPicker(
     props: AccountActions & {
+        active: boolean;
         notify: Notify;
         selected: string[];
         selectedEmojis: EmojiChoice[];
@@ -1177,6 +1216,7 @@ function EmojiPicker(
     const search = untrack(() => createEmojiSearch(props.api));
     const [pickerOpen, setPickerOpen] = createSignal(false);
     let addButton!: HTMLButtonElement;
+    const artworkActive = () => props.active && pickerOpen();
     const selected = () => props.autosave.draft() ?? props.selected;
 
     createEffect(
@@ -1220,11 +1260,12 @@ function EmojiPicker(
     onCleanup(search.dispose);
 
     return (
-        <section aria-label={t("emojiStatus")}>
+        <section aria-label={t("customEmoji")}>
             <Show when={props.premium}>
                 <SortableList
                     kind="emoji"
                     busy={props.busy}
+                    mediaActive={props.active}
                     reorder={save}
                     remove={toggle}
                     items={selected().map((id) => {
@@ -1235,7 +1276,7 @@ function EmojiPicker(
                         return {
                             id,
                             label: emojiDisplayName(choice?.label ?? id),
-                            mediaUrl: props.api.emojiMediaUrl(id),
+                            mediaUrl: props.api.emojiMediaUrl(choice?.document_id ?? id),
                             textColor: choice?.text_color,
                         };
                     })}
@@ -1309,23 +1350,25 @@ function EmojiPicker(
                                     onClick={() => selectPack(set.id)}
                                 >
                                     <span aria-hidden="true">
-                                        <EmojiMedia
-                                            url={set.cover_url}
-                                            label={set.title}
-                                            textColor={set.text_color}
-                                            fallback={
-                                                <svg class="pack-glyph" viewBox="0 0 24 24">
-                                                    <rect
-                                                        x="5"
-                                                        y="3"
-                                                        width="14"
-                                                        height="18"
-                                                        rx="3"
-                                                    />
-                                                    <path d="M8 8h8M8 12h8M8 16h4" />
-                                                </svg>
-                                            }
-                                        />
+                                        <Show when={artworkActive()}>
+                                            <EmojiMedia
+                                                url={set.cover_url}
+                                                label={set.title}
+                                                textColor={set.text_color}
+                                                fallback={
+                                                    <svg class="pack-glyph" viewBox="0 0 24 24">
+                                                        <rect
+                                                            x="5"
+                                                            y="3"
+                                                            width="14"
+                                                            height="18"
+                                                            rx="3"
+                                                        />
+                                                        <path d="M8 8h8M8 12h8M8 16h4" />
+                                                    </svg>
+                                                }
+                                            />
+                                        </Show>
                                     </span>
                                 </button>
                             )}
@@ -1358,12 +1401,24 @@ function EmojiPicker(
                                 <Show when={!packs.activeId}>
                                     <Button
                                         variant="ghost"
-                                        size="sm"
-                                        class="aria-disabled:opacity-55"
+                                        size="icon"
+                                        class="size-8 min-h-8 aria-disabled:opacity-55"
+                                        aria-label={t("refreshEmojiStatuses")}
+                                        title={t("refreshEmojiStatuses")}
                                         aria-disabled={packs.active?.loading ? "true" : undefined}
                                         onClick={() => void packs.select("")}
                                     >
-                                        {t("refreshEmojiStatuses")}
+                                        <svg
+                                            aria-hidden="true"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        >
+                                            <path d="M20 11a8 8 0 0 0-14-5L4 8m0-4v4h4M4 13a8 8 0 0 0 14 5l2-2m0 4v-4h-4" />
+                                        </svg>
                                     </Button>
                                 </Show>
                             </div>
@@ -1394,13 +1449,15 @@ function EmojiPicker(
                             <Show when={packs.active?.choices}>
                                 <For each={packs.groups}>
                                     {(group) => (
-                                        <section>
+                                        <section class={group.kind === "pack" ? "m-0" : undefined}>
                                             <Show when={group.kind !== "pack"}>
                                                 <h3 class="mt-4 mb-1 text-sm font-semibold text-muted-foreground">
                                                     {t(
                                                         group.kind === "recent"
                                                             ? "recentEmojiStatuses"
-                                                            : "suggestedEmojiStatuses",
+                                                            : group.kind === "collectible"
+                                                              ? "collectibleEmojiStatuses"
+                                                              : "suggestedEmojiStatuses",
                                                     )}
                                                 </h3>
                                             </Show>
@@ -1417,6 +1474,7 @@ function EmojiPicker(
                                                 }
                                             >
                                                 <EmojiChoices
+                                                    active={artworkActive()}
                                                     choices={group.choices}
                                                     api={props.api}
                                                     selected={selected()}
@@ -1435,6 +1493,7 @@ function EmojiPicker(
                             </h2>
                             <Show when={search.state.choices.length}>
                                 <EmojiChoices
+                                    active={artworkActive()}
                                     choices={search.state.choices}
                                     api={props.api}
                                     selected={selected()}

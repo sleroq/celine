@@ -82,6 +82,62 @@ describe("emoji media", () => {
         await expect(loadEmojiMedia(url, new AbortController().signal)).rejects.toThrow();
     });
 
+    test.each([
+        null,
+        [[]],
+        "animation",
+        {},
+        { layers: null },
+        { layers: {} },
+        { layers: [null] },
+        { layers: [[]] },
+        { layers: [], assets: {} },
+        { layers: [], assets: [null] },
+        { layers: [], assets: [{ layers: {} }] },
+        { layers: [{ masksProperties: {} }] },
+        { layers: [{ masksProperties: [null] }] },
+    ])("rejects malformed TGS structure and retries fresh bytes: %j", async (animation) => {
+        const fetch = spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(
+                new Response(Bun.gzipSync(JSON.stringify(animation)), {
+                    headers: { "Content-Type": "application/x-tgsticker" },
+                }),
+            )
+            .mockResolvedValueOnce(
+                new Response(Bun.gzipSync('{"layers":[]}'), {
+                    headers: { "Content-Type": "application/x-tgsticker" },
+                }),
+            );
+        await expect(loadEmojiMedia(url, new AbortController().signal)).rejects.toThrow();
+        expect(await loadEmojiMedia(url, new AbortController().signal)).toEqual({
+            format: "tgs",
+            animationData: { layers: [] },
+        });
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test("preserves unrelated Lottie data and image assets verbatim", async () => {
+        const animation = {
+            layers: [{ ty: 0, refId: "nested", masksProperties: [{ mode: "n", o: { k: 100 } }] }],
+            assets: [
+                { id: "nested", layers: [{ ty: 4, nm: "artwork" }] },
+                { id: "image", p: "image.png" },
+            ],
+            v: "5.7.4",
+            fr: 30,
+            metadata: { artist: "example" },
+        };
+        spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(Bun.gzipSync(JSON.stringify(animation)), {
+                headers: { "Content-Type": "application/x-tgsticker" },
+            }),
+        );
+        expect(await loadEmojiMedia(url, new AbortController().signal)).toEqual({
+            format: "tgs",
+            animationData: animation,
+        });
+    });
+
     test("reuses loaded artwork after its renderer is disposed", async () => {
         const fetch = spyOn(globalThis, "fetch").mockResolvedValue(
             new Response("image", {
@@ -147,6 +203,86 @@ describe("emoji media", () => {
             new Response("image", { headers: { "Content-Type": "image/webp" } }),
         );
         expect((await loadEmojiMedia(url, new AbortController().signal)).format).toBe("image");
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("encoded media cache budget", () => {
+    function signal() {
+        return new AbortController().signal;
+    }
+    const budget = 4 * 1024 * 1024;
+    function response(size: number) {
+        return new Response(new Uint8Array(size), { headers: { "Content-Type": "image/webp" } });
+    }
+
+    test("evicts least recently used blobs to stay within the byte budget", async () => {
+        const fetch = spyOn(globalThis, "fetch");
+        for (let i = 0; i < 4; i++) fetch.mockResolvedValueOnce(response(budget / 2));
+        const a = `${url}/a`;
+        const b = `${url}/b`;
+        const c = `${url}/c`;
+        await loadEmojiMedia(a, signal());
+        await loadEmojiMedia(b, signal());
+        await loadEmojiMedia(a, signal());
+        expect(fetch).toHaveBeenCalledTimes(2);
+        await loadEmojiMedia(c, signal());
+        await loadEmojiMedia(a, signal());
+        expect(fetch).toHaveBeenCalledTimes(3);
+        await loadEmojiMedia(b, signal());
+        expect(fetch).toHaveBeenCalledTimes(4);
+    });
+
+    test("renders oversized entries without caching or evicting useful artwork", async () => {
+        const fetch = spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(response(budget))
+            .mockResolvedValueOnce(response(budget + 1))
+            .mockResolvedValueOnce(response(budget + 1));
+        const small = `${url}/small`;
+        const large = `${url}/large`;
+        await loadEmojiMedia(small, signal());
+        await loadEmojiMedia(large, signal());
+        await loadEmojiMedia(large, signal());
+        await loadEmojiMedia(small, signal());
+        expect(fetch).toHaveBeenCalledTimes(3);
+    });
+
+    test("does not cache corrupt TGS bytes and retries with fresh bytes", async () => {
+        const fetch = spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(
+                new Response("broken", {
+                    headers: { "Content-Type": "application/x-tgsticker" },
+                }),
+            )
+            .mockResolvedValueOnce(
+                new Response(Bun.gzipSync('{"layers":[]}'), {
+                    headers: { "Content-Type": "application/x-tgsticker" },
+                }),
+            );
+        await expect(loadEmojiMedia(url, signal())).rejects.toThrow();
+        expect(await loadEmojiMedia(url, signal())).toEqual({
+            format: "tgs",
+            animationData: { layers: [] },
+        });
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test("does not cache a response cancelled while reading its body", async () => {
+        const abort = new AbortController();
+        const body = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                controller.enqueue(new Uint8Array([1]));
+                abort.abort();
+                controller.close();
+            },
+        });
+        const fetch = spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(
+                new Response(body, { headers: { "Content-Type": "image/webp" } }),
+            )
+            .mockResolvedValueOnce(response(1));
+        await expect(loadEmojiMedia(url, abort.signal)).rejects.toThrow();
+        await loadEmojiMedia(url, signal());
         expect(fetch).toHaveBeenCalledTimes(2);
     });
 });

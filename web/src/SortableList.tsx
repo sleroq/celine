@@ -3,13 +3,16 @@ import Sortable from "sortablejs";
 import type { JSX } from "@solidjs/web";
 import { moveItem } from "./api";
 import { EmojiMedia } from "./EmojiMedia";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui";
 import { t } from "./i18n";
 import { resetTilt, tilt } from "./tilt";
 
 const photoStatusIcons = {
     photoUploadNew: "M8 10V3m0 0L5 6m3-3 3 3M3 10v3h10v-3",
-    photoReusable: "M13 5V2m0 3h-3M3 11v3m0-3h3M3 6a5 5 0 0 1 9-2l1 1M3 11l1 1a5 5 0 0 0 9-2",
+    photoReusable:
+        "M13 3v3h-3M3 13v-3h3M3.5 6a5 5 0 0 1 8.3-1.8L13 6M3 10l1.2 1.8A5 5 0 0 0 12.5 10",
     photoUnavailable: "M5 5l6 6m0-6-6 6M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13",
+    photoDuplicate: "M5 3H3v10h10v-2M6 1h8v8H6z",
     photoChecking: "M8 4v4l3 2M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13",
     photoUnknown:
         "M6 6a2 2 0 1 1 3 1.7c-1 .5-1 1-1 1.8M8 12v.1M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13",
@@ -20,6 +23,7 @@ type Item = {
     label: string;
     imageUrl?: string;
     badge?: keyof typeof photoStatusIcons;
+    badgeActionLabel?: string;
     mediaUrl?: string;
     textColor?: boolean;
     reorderLabel?: string;
@@ -31,8 +35,10 @@ type Props = {
     kind: "photo" | "emoji";
     items: Item[];
     busy: boolean;
+    mediaActive?: boolean;
     reorder: (ids: string[]) => void;
     remove: (id: string) => void;
+    recover?: (id: string) => void;
     trailing?: JSX.Element;
     edit?: (id: string, button: HTMLButtonElement) => void;
     preview?: (id: string, button: HTMLButtonElement) => void;
@@ -124,10 +130,6 @@ export function SortableList(props: Props) {
                 <For each={ids()}>
                     {(id, index) => {
                         const item = () => props.items.find((candidate) => candidate.id === id)!;
-                        const badgeText = () => {
-                            const badge = item().badge;
-                            return badge ? t(badge) : undefined;
-                        };
 
                         return (
                             <li
@@ -146,7 +148,6 @@ export function SortableList(props: Props) {
                                                 ? t("reorderPhoto", { name: item().label })
                                                 : t("reorderEmoji", { name: item().label }))
                                         }
-                                        title={badgeText()}
                                         aria-describedby={[
                                             hintId(),
                                             item().badge && `${props.kind}-badge-${id}`,
@@ -204,11 +205,13 @@ export function SortableList(props: Props) {
                                         >
                                             {(url) => (
                                                 <span aria-hidden="true">
-                                                    <EmojiMedia
-                                                        url={url()}
-                                                        label={item().label}
-                                                        textColor={item().textColor}
-                                                    />
+                                                    <Show when={props.mediaActive !== false}>
+                                                        <EmojiMedia
+                                                            url={url()}
+                                                            label={item().label}
+                                                            textColor={item().textColor}
+                                                        />
+                                                    </Show>
                                                 </span>
                                             )}
                                         </Show>
@@ -232,18 +235,67 @@ export function SortableList(props: Props) {
                                     </Show>
                                     <Show when={item().badge}>
                                         {(badge) => (
-                                            <span
-                                                id={`${props.kind}-badge-${id}`}
-                                                class="pointer-events-none absolute inset-e-1 bottom-1 grid size-5 place-items-center rounded-md border border-border bg-surface text-foreground shadow-sm"
-                                            >
-                                                <svg
-                                                    aria-hidden="true"
-                                                    class="size-3.5 fill-none stroke-current stroke-2"
-                                                    viewBox="0 0 16 16"
+                                            <span class="pointer-events-none absolute inset-e-1 bottom-1 grid size-5 place-items-center rounded-md border border-border bg-surface/70 text-foreground shadow-sm">
+                                                <Tooltip>
+                                                    <Show
+                                                        when={item().badgeActionLabel}
+                                                        fallback={
+                                                            <TooltipTrigger
+                                                                as="span"
+                                                                role="img"
+                                                                tabindex="0"
+                                                                aria-label={t("photoStatus")}
+                                                                aria-describedby={`${props.kind}-badge-${id}`}
+                                                                class="pointer-events-auto grid size-full place-items-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                                            >
+                                                                <svg
+                                                                    aria-hidden="true"
+                                                                    class="size-3.5 fill-none stroke-current stroke-[1.5]"
+                                                                    stroke-linecap="round"
+                                                                    stroke-linejoin="round"
+                                                                    viewBox="0 0 16 16"
+                                                                >
+                                                                    <path
+                                                                        d={
+                                                                            photoStatusIcons[
+                                                                                badge()
+                                                                            ]
+                                                                        }
+                                                                    />
+                                                                </svg>
+                                                            </TooltipTrigger>
+                                                        }
+                                                    >
+                                                        {(label) => (
+                                                            <TooltipTrigger
+                                                                as="button"
+                                                                type="button"
+                                                                class="pointer-events-auto grid size-full min-h-0 place-items-center rounded-md border-0 bg-transparent p-0 text-inherit focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                                                aria-label={label()}
+                                                                aria-describedby={`${props.kind}-badge-${id}`}
+                                                                disabled={props.busy}
+                                                                onClick={() => props.recover?.(id)}
+                                                            >
+                                                                <svg
+                                                                    aria-hidden="true"
+                                                                    class="size-3.5 fill-none stroke-current stroke-[1.5]"
+                                                                    stroke-linecap="round"
+                                                                    stroke-linejoin="round"
+                                                                    viewBox="0 0 16 16"
+                                                                >
+                                                                    <path d="M8 11V5m0 0L5.5 7.5M8 5l2.5 2.5M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13" />
+                                                                </svg>
+                                                            </TooltipTrigger>
+                                                        )}
+                                                    </Show>
+                                                    <TooltipContent>
+                                                        {item().badgeActionLabel ?? t(badge())}
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                                <span
+                                                    id={`${props.kind}-badge-${id}`}
+                                                    class="visually-hidden sr-only"
                                                 >
-                                                    <path d={photoStatusIcons[badge()]} />
-                                                </svg>
-                                                <span class="visually-hidden sr-only">
                                                     {t(badge())}
                                                 </span>
                                             </span>

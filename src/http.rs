@@ -41,6 +41,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/photos/history/{id}", get(history_photo))
         .route("/api/photos/order", post(reorder))
         .route("/api/photos/{id}", get(photo).delete(remove))
+        .route("/api/photos/{id}/reupload", post(reupload_photo))
         .route("/api/photos/{id}/original", get(original_photo))
         .route("/api/photos/{id}/crop", put(save_crop))
         .route("/api/auth/qr", post(qr))
@@ -378,7 +379,7 @@ async fn emoji_media(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Respon
         .data
         .selected_emojis
         .iter()
-        .any(|emoji| emoji.id == id.to_string());
+        .any(|emoji| emoji.document_id.as_deref().unwrap_or(&emoji.id) == id.to_string());
     match telegram.emoji_media(id, selected).await {
         Ok((bytes, content_type)) => {
             ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
@@ -489,8 +490,15 @@ async fn reorder(State(app): State<Arc<App>>, Json(ids): Json<Ids>) -> Response 
         Err(error) => bad(error),
     }
 }
+async fn reupload_photo(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+    let _connection = app.lock_telegram().await;
+    match app.reupload_photo(&id).await {
+        Ok(()) => ok(),
+        Err(error) => bad(error),
+    }
+}
 async fn remove(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
-    match app.repository.lock().await.remove_photo(&id) {
+    match app.remove_photo(&id).await {
         Ok(()) => ok(),
         Err(error) => bad(error),
     }
@@ -1027,6 +1035,7 @@ mod tests {
             .await
             .update(|library| {
                 library.selected_emojis.push(crate::telegram::EmojiChoice {
+                    document_id: None,
                     id: "1".into(),
                     label: "Star".into(),
                     source: "Test".into(),
@@ -1406,6 +1415,27 @@ mod tests {
         assert_eq!(restored.state().await.library.photos.len(), 11);
     }
     #[tokio::test]
+    async fn reupload_endpoint_rejects_without_ready_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::open(dir.path().into(), None).unwrap();
+        let response = router(app)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/photos/missing/reupload")
+                    .header(header::HOST, ADDRESS)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error_info"]["code"], "photo.history_not_ready");
+    }
+
+    #[tokio::test]
     async fn cached_history_can_be_browsed_selected_and_edited_during_cooldown() {
         let dir = tempfile::tempdir().unwrap();
         let app = App::open(dir.path().into(), None).unwrap();
@@ -1536,6 +1566,7 @@ mod tests {
             .add_upload("Portrait", b"jpeg", b"jpeg", None, true)
             .unwrap();
         let choice = crate::telegram::EmojiChoice {
+            document_id: None,
             id: "9223372036854775806".into(),
             label: "Star".into(),
             source: "Pack".into(),
