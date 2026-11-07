@@ -4,6 +4,7 @@ use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, task::JoinHandle};
+use tracing::Instrument;
 
 use crate::app::{App, Credentials};
 
@@ -41,9 +42,14 @@ impl Accounts {
             .truncate(false)
             .open(dir.join("celine.lock"))?;
         fs2::FileExt::try_lock_exclusive(&lock)
+            .inspect_err(|error| {
+                tracing::error!(io_kind = ?error.kind(), "Cannot acquire the data-directory lock");
+            })
             .context("Celine is already using this data directory")?;
         let registry = match fs::read(dir.join("accounts.json")) {
-            Ok(bytes) => serde_json::from_slice::<Registry>(&bytes)?,
+            Ok(bytes) => serde_json::from_slice::<Registry>(&bytes).inspect_err(|error| {
+                tracing::error!(category = ?error.classify(), "Account registry is invalid");
+            })?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 // A fixed migration destination lets an interrupted migration resume.
                 let id = "legacy".to_owned();
@@ -72,11 +78,12 @@ impl Accounts {
                 bail!("Invalid account id in registry");
             }
             let app = App::open(dir.join("accounts").join(id), credentials)?;
-            let worker = tokio::spawn(app.clone().run());
+            let worker = spawn_worker(id, &app);
             accounts.insert(id.clone(), Account { app, worker });
         }
         let inner = Inner { registry, accounts };
         Self::persist(&dir, &inner.registry)?;
+        tracing::info!(count = inner.accounts.len(), "Account registry opened");
         Ok(Arc::new(Self {
             dir,
             credentials,
@@ -141,7 +148,8 @@ impl Accounts {
         };
         registry.accounts.push(id.clone());
         Self::persist(&self.dir, &registry)?;
-        let worker = tokio::spawn(app.clone().run());
+        let worker = spawn_worker(&id, &app);
+        tracing::info!(account_id = id.as_str(), "Account added");
         inner.accounts.insert(id, Account { app, worker });
         inner.registry = registry;
         Ok(())
@@ -157,6 +165,7 @@ impl Accounts {
         };
         Self::persist(&self.dir, &registry)?;
         inner.registry = registry;
+        tracing::info!(account_id = id, "Active account changed");
         Ok(())
     }
     pub async fn remove(&self, id: &str) -> Result<()> {
@@ -191,14 +200,21 @@ impl Accounts {
         account.worker.abort();
         account.app.disconnect().await;
         inner.accounts.remove(id);
+        tracing::info!(account_id = id, "Account removed");
         if let Some((id, app)) = replacement {
-            let worker = tokio::spawn(app.clone().run());
+            let worker = spawn_worker(&id, &app);
             inner.accounts.insert(id, Account { app, worker });
         }
         inner.registry = registry;
         Ok(())
     }
 }
+
+fn spawn_worker(id: &str, app: &Arc<App>) -> JoinHandle<()> {
+    let span = tracing::info_span!(parent: None, "account", account_id = id);
+    tokio::spawn(app.clone().run().instrument(span))
+}
+
 impl Drop for Accounts {
     fn drop(&mut self) {
         for account in self.inner.get_mut().accounts.values() {

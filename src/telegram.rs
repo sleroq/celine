@@ -120,6 +120,7 @@ impl std::error::Error for TelegramError {}
 
 impl From<InvocationError> for TelegramError {
     fn from(error: InvocationError) -> Self {
+        log_invocation_error(&error);
         match error {
             InvocationError::Rpc(rpc) if rpc.code == 420 => Self {
                 info: crate::messages::MessageInfo::new("telegram.rate_limited"),
@@ -167,6 +168,38 @@ impl From<InvocationError> for TelegramError {
                 "Telegram could not complete this request. Please retry.",
             ),
         }
+    }
+}
+
+fn log_invocation_error(error: &InvocationError) {
+    match error {
+        InvocationError::Rpc(rpc) => {
+            let name = match rpc.name.as_str() {
+                "FLOOD_WAIT"
+                | "FLOOD_PREMIUM_WAIT"
+                | "SLOWMODE_WAIT"
+                | "TAKEOUT_INIT_DELAY"
+                | "SESSION_PASSWORD_NEEDED"
+                | "SESSION_REVOKED"
+                | "SESSION_EXPIRED"
+                | "AUTH_KEY_UNREGISTERED"
+                | "AUTH_KEY_DUPLICATED"
+                | "USER_DEACTIVATED"
+                | "USER_DEACTIVATED_BAN"
+                | "PASSWORD_HASH_INVALID"
+                | "SRP_ID_INVALID"
+                | "PHOTO_ID_INVALID" => rpc.name.as_str(),
+                _ => "other",
+            };
+            let method = rpc.caused_by.map(tl::name_for_id).unwrap_or("unknown");
+            let retry_after = (rpc.code == 420).then(|| u64::from(rpc.value.unwrap_or(30)).max(1));
+            tracing::warn!(rpc_code = rpc.code, rpc_name = name, method, retry_after_seconds = ?retry_after, "Telegram RPC failed");
+        }
+        InvocationError::Io(error) => {
+            tracing::warn!(kind = ?error.kind(), "Telegram connection failed");
+        }
+        InvocationError::Dropped(_) => tracing::warn!("Telegram connection dropped"),
+        _ => tracing::warn!("Telegram request failed"),
     }
 }
 

@@ -179,6 +179,7 @@ impl App {
             auth.message_info = None;
         }
         *self.profile.write().await = None;
+        tracing::info!("Logged out");
         Ok(())
     }
     pub async fn disconnect(&self) {
@@ -276,6 +277,7 @@ impl App {
                 ));
             }
         }
+        let interval_seconds = settings.interval_secs;
         if emoji {
             repository.update(|library| library.update_emoji_settings(settings, now()))?;
         } else {
@@ -296,6 +298,16 @@ impl App {
         } else {
             *self.photo_error.write().await = None;
         }
+        tracing::info!(
+            rotation = if emoji { "emoji" } else { "photo" },
+            interval_seconds,
+            action = match action {
+                ScheduleAction::Apply => "apply",
+                ScheduleAction::Start => "start",
+                ScheduleAction::Stop => "stop",
+            },
+            "Rotation schedule updated"
+        );
         Ok(())
     }
     pub async fn select_emojis(&self, ids: &[String]) -> Result<()> {
@@ -440,8 +452,14 @@ impl App {
         }
         *self.photo_cache_status.write().await = PhotoCacheStatus::Refreshing;
         let result = self.sync_photo_history_step(telegram, sync).await;
-        if result.is_err() {
+        if let Err(error) = &result {
             *self.photo_cache_status.write().await = PhotoCacheStatus::Error;
+            tracing::warn!(
+                code = error.info.code,
+                retry_after = error.retry_after,
+                unauthorized = error.unauthorized,
+                "Photo cache refresh failed"
+            );
         }
         result
     }
@@ -461,6 +479,7 @@ impl App {
             Err(error) => {
                 self.record_telegram_error(&error).await;
                 *retry_at = now().saturating_add(30);
+                tracing::info!(retry_in_seconds = 30, "Photo cache refresh retry scheduled");
             }
         }
         Ok(())
@@ -501,6 +520,7 @@ impl App {
                 } else {
                     self.match_local_photos().await.map_err(storage_error)?;
                     *sync = PhotoCacheSync::Ready;
+                    tracing::info!("Photo cache refresh completed");
                 }
             }
             PhotoCacheSync::Ready => {}
@@ -536,6 +556,7 @@ impl App {
             return Err(unavailable());
         };
         let auth = telegram.begin_qr().await?;
+        tracing::info!("QR authentication started");
         *self.auth.write().await = auth;
         *self.profile.write().await = telegram.profile();
         Ok(())
@@ -546,6 +567,10 @@ impl App {
             return Err(unavailable());
         };
         let auth = telegram.submit_password(password).await?;
+        tracing::info!(
+            authorized = auth.status == "authorized",
+            "Password authentication completed"
+        );
         *self.auth.write().await = auth;
         *self.profile.write().await = telegram.profile();
         Ok(())
@@ -566,6 +591,10 @@ impl App {
                     })
                     .is_err()
             {
+                tracing::warn!(
+                    code = "storage.cooldown_save_failed",
+                    "Telegram cooldown could not be persisted"
+                );
                 *self.last_error.write().await = Some(LocalizedMessage::new(
                     "Telegram requested a cooldown, but Celine could not persist it. Check disk space and directory permissions before restarting.",
                     MessageInfo::parameter("storage.cooldown_save_failed", "seconds", wait),
@@ -575,6 +604,9 @@ impl App {
         if error.unauthorized {
             *self.profile.write().await = None;
             let mut auth = self.auth.write().await;
+            if auth.status != "disconnected" {
+                tracing::info!("Authorization expired; disconnected");
+            }
             auth.status = "disconnected".into();
             auth.qr_svg = None;
             auth.message =
@@ -607,7 +639,15 @@ impl App {
                         }
                         drop(status);
                         self.record_telegram_error(&error).await;
-                        retry_at = now().saturating_add(error.retry_after.unwrap_or(30).max(2));
+                        let retry_in_seconds = error.retry_after.unwrap_or(30).max(2);
+                        retry_at = now().saturating_add(retry_in_seconds);
+                        tracing::warn!(
+                            code = error.info.code,
+                            retry_after = error.retry_after,
+                            unauthorized = error.unauthorized,
+                            retry_in_seconds,
+                            "Background work failed; retry scheduled"
+                        );
                     }
                 }
             }
@@ -630,13 +670,29 @@ impl App {
         *self.last_error.write().await = None;
         let authorized = auth.status == "authorized";
         let premium = auth.premium;
-        *self.auth.write().await = auth;
+        {
+            let mut previous = self.auth.write().await;
+            if previous.status != auth.status {
+                tracing::info!(
+                    authorized,
+                    password_required = auth.status == "password",
+                    "Authentication state changed"
+                );
+            }
+            *previous = auth;
+        }
         *self.profile.write().await = if authorized { telegram.profile() } else { None };
         if authorized {
             if !premium {
                 self.stop_nonpremium_emoji_rotation().await?;
             }
             if let Err(mut error) = self.rotate_photos_if_due(telegram).await {
+                tracing::warn!(
+                    code = error.info.code,
+                    retry_after = error.retry_after,
+                    unauthorized = error.unauthorized,
+                    "Photo rotation failed"
+                );
                 error.info.params["context"] = "photo".into();
                 *self.photo_error.write().await = Some(LocalizedMessage::new(
                     format!("Photo rotation: {}", error.message),
@@ -648,6 +704,12 @@ impl App {
                 }
             }
             if let Err(mut error) = self.rotate_emojis_if_due(telegram).await {
+                tracing::warn!(
+                    code = error.info.code,
+                    retry_after = error.retry_after,
+                    unauthorized = error.unauthorized,
+                    "Emoji rotation failed"
+                );
                 error.info.params["context"] = "emoji".into();
                 *self.emoji_error.write().await = Some(LocalizedMessage::new(
                     format!("Emoji rotation: {}", error.message),
@@ -676,6 +738,7 @@ impl App {
                 })
                 .map_err(storage_error)?;
             *self.emoji_error.write().await = None;
+            tracing::info!("Emoji rotation stopped: Premium required");
             *self.last_error.write().await = Some(LocalizedMessage::new(
                 "Telegram Premium is required. Emoji rotation has stopped.",
                 MessageInfo::new("rotation.premium_required"),
@@ -732,9 +795,11 @@ impl App {
                         .complete_photo_rotation(&photo.id)
                         .map_err(storage_error)?;
                     *self.photo_error.write().await = None;
+                    tracing::info!("Photo rotation completed");
                     return Ok(());
                 }
                 Ok(false) => {
+                    tracing::info!("Photo rotation candidate unavailable; skipping");
                     after = Some(photo.id.clone());
                     skipped.push(photo.id);
                 }
@@ -837,7 +902,12 @@ impl App {
         photo: &Photo,
     ) -> Result<bool, TelegramError> {
         if let Some(id) = &photo.telegram_id {
-            return telegram.use_history_photo(id).await;
+            tracing::info!(method = "history", "Photo change attempted");
+            let result = telegram.use_history_photo(id).await;
+            if let Ok(applied) = &result {
+                tracing::info!(method = "history", applied, "Photo change completed");
+            }
+            return result;
         }
         let path = self
             .repository
@@ -855,7 +925,9 @@ impl App {
             .await
             .mark_photo_uploading(&photo.id)
             .map_err(storage_error)?;
+        tracing::info!(method = "upload", "Photo change attempted");
         let id = telegram.set_photo(&path).await?;
+        tracing::info!(method = "upload", applied = true, "Photo change completed");
         self.photo_cache
             .lock()
             .await
@@ -898,6 +970,7 @@ impl App {
             retry_after: None,
             unauthorized: false,
         })?;
+        tracing::info!("Emoji rotation attempted");
         telegram.set_emoji_status(document_id).await?;
         self.repository
             .lock()
@@ -908,6 +981,7 @@ impl App {
             })
             .map_err(storage_error)?;
         *self.emoji_error.write().await = None;
+        tracing::info!("Emoji rotation completed");
         Ok(())
     }
 }
@@ -923,7 +997,11 @@ pub fn unavailable() -> TelegramError {
         unauthorized: false,
     }
 }
-fn storage_error(_: anyhow::Error) -> TelegramError {
+fn storage_error(error: anyhow::Error) -> TelegramError {
+    tracing::warn!(
+        io_kind = ?error.downcast_ref::<std::io::Error>().map(std::io::Error::kind),
+        "Celine state operation failed"
+    );
     TelegramError {
         info: crate::messages::MessageInfo::new("storage.state_save_failed"),
         message:

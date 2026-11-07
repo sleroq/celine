@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     body::Body,
-    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
+    extract::{DefaultBodyLimit, MatchedPath, Multipart, Path, Query, State},
     http::{HeaderMap, Request, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -13,6 +13,7 @@ use axum::{
 use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 use serde_json::json;
+use tracing::Instrument;
 
 use crate::{
     app::{App, ScheduleAction, unavailable},
@@ -51,18 +52,31 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/emojis/{id}/media", get(emoji_media))
         .fallback(assets)
         .layer(DefaultBodyLimit::max(12 * 1024 * 1024))
+        .layer(middleware::from_fn(log_request))
         .layer(middleware::from_fn(local_boundary))
         .with_state(app)
 }
 pub async fn serve(app: Arc<crate::accounts::Accounts>) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(ADDRESS).await?;
-    println!("Celine is ready at http://{ADDRESS}");
+    let url = format!("http://{ADDRESS}");
+    println!("Celine is ready at {url}");
+    tracing::info!("Local HTTP server ready");
+    open_browser(url);
     axum::serve(listener, accounts_router(app))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await?;
     Ok(())
+}
+
+fn open_browser(url: String) {
+    std::thread::spawn(move || {
+        if let Err(error) = open::that(&url) {
+            tracing::warn!("Could not open the browser automatically");
+            eprintln!("Could not open the browser automatically: {error}. Open {url} manually.");
+        }
+    });
 }
 
 pub fn accounts_router(accounts: Arc<crate::accounts::Accounts>) -> Router {
@@ -106,7 +120,11 @@ async fn account_request(
             };
         }
         if tail.is_empty() && method == axum::http::Method::DELETE {
-            return match accounts.remove(&id).await {
+            return match accounts
+                .remove(&id)
+                .instrument(tracing::info_span!("account", account_id = id.as_str()))
+                .await
+            {
                 Ok(()) => ok(),
                 Err(error) => match error.downcast::<TelegramError>() {
                     Ok(error) => telegram_error(&app, error).await,
@@ -125,7 +143,11 @@ async fn account_request(
             .unwrap_or_default();
         *request.uri_mut() = format!("/api/{tail}{query}").parse().unwrap();
     }
-    let mut response = router(app).oneshot(request).await.unwrap();
+    let mut response = router(app)
+        .oneshot(request)
+        .instrument(tracing::info_span!("account", account_id = id.as_str()))
+        .await
+        .unwrap();
     if scoped.is_none() {
         response
             .headers_mut()
@@ -163,6 +185,31 @@ fn immutable_media_path(path: &str) -> bool {
     }
 }
 
+async fn log_request(request: Request<Body>, next: Next) -> Response {
+    let method = request.method().clone();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|path| path.as_str().to_owned())
+        .unwrap_or_default();
+    let span = tracing::info_span!("request", method = %method, route = route.as_str());
+    async move {
+        let response = next.run(request).await;
+        if route.starts_with("/api/") {
+            if response.status().is_success() && method != axum::http::Method::GET {
+                tracing::info!(status = response.status().as_u16(), "API request completed");
+            } else if (response.status().is_client_error() || response.status().is_server_error())
+                && response.extensions().get::<LoggedError>().is_none()
+            {
+                tracing::warn!(status = response.status().as_u16(), "API request rejected");
+            }
+        }
+        response
+    }
+    .instrument(span)
+    .await
+}
+
 async fn local_boundary(request: Request<Body>, next: Next) -> Response {
     if !is_local_request(request.headers()) {
         return api_error(
@@ -197,8 +244,18 @@ fn is_local_request(headers: &HeaderMap) -> bool {
         .get("sec-fetch-site")
         .is_some_and(|value| value == "cross-site")
 }
+#[derive(Clone)]
+struct LoggedError;
+
 fn api_error(status: StatusCode, message: &str, info: MessageInfo) -> Response {
-    (status, Json(json!({"error":message, "error_info":info}))).into_response()
+    tracing::warn!(
+        status = status.as_u16(),
+        code = info.code,
+        "API request failed"
+    );
+    let mut response = (status, Json(json!({"error":message, "error_info":info}))).into_response();
+    response.extensions_mut().insert(LoggedError);
+    response
 }
 fn bad(error: anyhow::Error) -> Response {
     api_error(

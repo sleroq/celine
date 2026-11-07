@@ -2,6 +2,7 @@ mod accounts;
 mod app;
 mod http;
 mod library;
+mod logging;
 mod messages;
 mod photo_cache;
 mod photo_match;
@@ -14,14 +15,37 @@ use app::Credentials;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let dir = data_directory()?;
+    if let Err(error) = logging::init(&dir) {
+        eprintln!("Celine could not initialize file logging: {error:#}");
+    }
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "Celine starting");
     let credentials = Credentials::embedded();
     if credentials.is_none() {
+        tracing::warn!("Telegram API credentials are not configured");
         eprintln!(
             "Celine has no valid embedded Telegram API credentials. The web UI will explain how to rebuild; Telegram login is unavailable."
         );
     }
-    let accounts = accounts::Accounts::open(data_directory()?, credentials)?;
-    http::serve(accounts).await
+    let accounts = match accounts::Accounts::open(dir, credentials) {
+        Ok(accounts) => accounts,
+        Err(error) => {
+            tracing::error!(
+                io_kind = ?error.downcast_ref::<std::io::Error>().map(std::io::Error::kind),
+                "Cannot open the account registry"
+            );
+            return Err(error);
+        }
+    };
+    let result = http::serve(accounts).await;
+    match &result {
+        Ok(()) => tracing::info!("Celine stopped"),
+        Err(error) => tracing::error!(
+            io_kind = ?error.downcast_ref::<std::io::Error>().map(std::io::Error::kind),
+            "Celine HTTP server stopped with an error"
+        ),
+    }
+    result
 }
 
 fn data_directory() -> Result<PathBuf> {
