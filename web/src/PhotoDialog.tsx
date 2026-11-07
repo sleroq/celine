@@ -1,3 +1,4 @@
+import { photoDisplayName } from "./display-names";
 import { createSignal, onSettled, Show, untrack } from "solid-js";
 import type { AccountApi, Photo } from "./api";
 import { CropEditor } from "./CropEditor";
@@ -65,7 +66,7 @@ export function PhotoDialog(props: {
                             <div class="photo-preview-crop">
                                 <img
                                     src={props.api.originalPhotoUrl(props.photo.id)}
-                                    alt={props.photo.name}
+                                    alt={photoDisplayName(props.photo)}
                                     style={imageStyle()}
                                     onLoad={(event) => {
                                         setDimensions({
@@ -89,7 +90,9 @@ export function PhotoDialog(props: {
                                 <button
                                     type="button"
                                     class="sortable-edit photo-preview-edit shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
-                                    aria-label={t("cropPhoto", { name: props.photo.name })}
+                                    aria-label={t("cropPhoto", {
+                                        name: photoDisplayName(props.photo),
+                                    })}
                                     onClick={() => setEditing(true)}
                                 >
                                     <svg aria-hidden="true" viewBox="0 0 24 24">

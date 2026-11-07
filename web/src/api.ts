@@ -67,7 +67,7 @@ export type EmojiChoice = {
     id: string;
     label: string;
     source: string;
-    source_kind?: "recent" | "default" | "pack" | null;
+    source_kind?: "recent" | "default" | "pack" | "search" | null;
     thumbnail_url?: string;
     text_color?: boolean;
 };
@@ -76,6 +76,7 @@ export type Emojis = {
     sets: { id: string; title: string; cover_url: string; count: number; text_color?: boolean }[];
     premium: boolean;
 };
+export type EmojiSearchResults = { choices: EmojiChoice[]; next_offset: number | null };
 
 export class RequestError extends Error {}
 
@@ -121,13 +122,21 @@ function createRequest(base: string) {
     function send(path: "state"): Promise<State>;
     function send(path: "photos/history"): Promise<{ photos: { id: string }[] }>;
     function send(path: "emojis"): Promise<Emojis>;
+    function send(path: `emojis/search?${string}`): Promise<EmojiSearchResults>;
     function send(path: `emojis/sets/${string}`): Promise<Pick<Emojis, "choices">>;
     function send(path: string, method: MutationMethod, body?: RequestBody): Promise<void>;
     async function send(
         path: string,
         method: "GET" | MutationMethod = "GET",
         body?: RequestBody,
-    ): Promise<State | Emojis | Pick<Emojis, "choices"> | { photos: { id: string }[] } | void> {
+    ): Promise<
+        | State
+        | Emojis
+        | EmojiSearchResults
+        | Pick<Emojis, "choices">
+        | { photos: { id: string }[] }
+        | void
+    > {
         const options: RequestInit = {
             method,
             cache: "no-store",

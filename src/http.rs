@@ -18,7 +18,7 @@ use tracing::Instrument;
 use crate::{
     app::{App, ScheduleAction, unavailable},
     library::{Crop, Settings, normalize_photo},
-    telegram::TelegramError,
+    telegram::{EmojiSearch, EmojiSearchResults, TelegramError},
 };
 
 static ASSETS: Dir<'_> = include_dir!("$OUT_DIR/web");
@@ -46,6 +46,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/auth/qr", post(qr))
         .route("/api/auth/password", post(password))
         .route("/api/emojis", get(emojis).put(select_emojis))
+        .route("/api/emojis/search", get(search_emojis))
         .route("/api/emojis/sets/{id}", get(emoji_set))
         .route("/api/emojis/sets/{id}/cover", get(emoji_set_cover))
         .route("/api/emojis/{id}/thumbnail", get(emoji_thumbnail))
@@ -666,6 +667,37 @@ async fn emojis(State(app): State<Arc<App>>) -> Response {
     Json(json!({"choices":choices,"sets":sets,"premium":app.auth.read().await.premium}))
         .into_response()
 }
+async fn search_emojis(State(app): State<Arc<App>>, Query(search): Query<EmojiSearch>) -> Response {
+    if search.offset < 0 {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "Search offset must be nonnegative.",
+            MessageInfo::new("emoji.search_invalid_offset"),
+        );
+    }
+    if search.q.trim().is_empty() && search.emoticon.trim().is_empty() {
+        return Json(EmojiSearchResults {
+            choices: Vec::new(),
+            next_offset: None,
+        })
+        .into_response();
+    }
+    let mut connection = match app.connection().await {
+        Ok(connection) => connection,
+        Err(error) => return telegram_error(&app, error).await,
+    };
+    let Some(telegram) = connection.as_mut() else {
+        return telegram_error(&app, unavailable()).await;
+    };
+    match telegram.search_emojis(&search).await {
+        Ok(results) => {
+            app.remember_choices(&results.choices).await;
+            Json(results).into_response()
+        }
+        Err(error) => telegram_error(&app, error).await,
+    }
+}
+
 async fn emoji_set(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Response {
     let mut connection = match app.connection().await {
         Ok(connection) => connection,
@@ -841,6 +873,38 @@ mod tests {
             .body(Body::empty())
             .unwrap()
     }
+    #[tokio::test]
+    async fn emoji_search_handles_blank_queries_and_validates_parameters() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = router(App::open(dir.path().into(), None).unwrap());
+        let response = router
+            .clone()
+            .oneshot(request("/api/emojis/search?q=%20%20&lang=ja-JP%2Cen"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            json!({"choices": [], "next_offset": null})
+        );
+        for path in [
+            "/api/emojis/search?q=cat&offset=-1",
+            "/api/emojis/search?q=cat&offset=2147483648",
+            "/api/emojis/search?lang=en",
+        ] {
+            assert_eq!(
+                router
+                    .clone()
+                    .oneshot(request(path))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+    }
+
     #[test]
     fn media_cache_keys_require_stable_identifiers_and_versions() {
         assert!(immutable_media_path("emojis/9223372036854775806/media"));

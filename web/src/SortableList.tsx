@@ -130,154 +130,160 @@ export function SortableList(props: Props) {
                         };
 
                         return (
-                            <li class="sortable-item relative">
-                                <button
-                                    type="button"
-                                    class="sortable-handle rounded-lg border bg-[Canvas] shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
-                                    onPointerMove={tilt}
-                                    onPointerLeave={resetTilt}
-                                    onPointerCancel={resetTilt}
-                                    aria-label={
-                                        item().reorderLabel ??
-                                        (props.kind === "photo"
-                                            ? t("reorderPhoto", { name: item().label })
-                                            : t("reorderEmoji", { name: item().label }))
-                                    }
-                                    title={badgeText()}
-                                    aria-describedby={[
-                                        hintId(),
-                                        item().badge && `${props.kind}-badge-${id}`,
-                                        item().current && `${props.kind}-current-${id}`,
-                                    ]
-                                        .filter(Boolean)
-                                        .join(" ")}
-                                    aria-disabled={props.busy ? "true" : "false"}
-                                    aria-pressed={picked() === id ? "true" : "false"}
-                                    onClick={() => choose(id)}
-                                    onDblClick={(event) => {
-                                        if (!props.busy && props.preview) {
-                                            setPicked(undefined);
-                                            props.preview(id, event.currentTarget);
+                            <li
+                                class="sortable-item relative"
+                                onPointerMove={tilt}
+                                onPointerLeave={resetTilt}
+                                onPointerCancel={resetTilt}
+                            >
+                                <div class="sortable-surface relative">
+                                    <button
+                                        type="button"
+                                        class="sortable-handle rounded-lg border bg-[Canvas] shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                        aria-label={
+                                            item().reorderLabel ??
+                                            (props.kind === "photo"
+                                                ? t("reorderPhoto", { name: item().label })
+                                                : t("reorderEmoji", { name: item().label }))
                                         }
-                                    }}
-                                    onKeyDown={(event) => {
-                                        const direction =
-                                            event.key === "ArrowLeft" || event.key === "ArrowUp"
-                                                ? -1
-                                                : event.key === "ArrowRight" ||
-                                                    event.key === "ArrowDown"
-                                                  ? 1
-                                                  : 0;
-                                        if (!direction || props.busy) return;
-                                        event.preventDefault();
-                                        const target = index() + direction;
-                                        if (target < 0 || target >= props.items.length) return;
-                                        move(index(), target);
-                                        flush();
-                                        event.currentTarget.focus();
-                                    }}
-                                >
-                                    <Show
-                                        when={item().mediaUrl}
-                                        fallback={
-                                            <Show
-                                                when={item().imageUrl}
-                                                fallback={
-                                                    <span class="sortable-fallback max-w-full truncate text-sm">
-                                                        {item().label}
-                                                    </span>
-                                                }
-                                            >
-                                                {(url) => (
-                                                    <img
-                                                        src={url()}
-                                                        alt=""
-                                                        loading="lazy"
-                                                        draggable="false"
-                                                    />
-                                                )}
-                                            </Show>
-                                        }
+                                        title={badgeText()}
+                                        aria-describedby={[
+                                            hintId(),
+                                            item().badge && `${props.kind}-badge-${id}`,
+                                            item().current && `${props.kind}-current-${id}`,
+                                        ]
+                                            .filter(Boolean)
+                                            .join(" ")}
+                                        aria-disabled={props.busy ? "true" : "false"}
+                                        aria-pressed={picked() === id ? "true" : "false"}
+                                        onClick={() => choose(id)}
+                                        onDblClick={(event) => {
+                                            if (!props.busy && props.preview) {
+                                                setPicked(undefined);
+                                                props.preview(id, event.currentTarget);
+                                            }
+                                        }}
+                                        onKeyDown={(event) => {
+                                            const direction =
+                                                event.key === "ArrowLeft" || event.key === "ArrowUp"
+                                                    ? -1
+                                                    : event.key === "ArrowRight" ||
+                                                        event.key === "ArrowDown"
+                                                      ? 1
+                                                      : 0;
+                                            if (!direction || props.busy) return;
+                                            event.preventDefault();
+                                            const target = index() + direction;
+                                            if (target < 0 || target >= props.items.length) return;
+                                            move(index(), target);
+                                            flush();
+                                            event.currentTarget.focus();
+                                        }}
                                     >
-                                        {(url) => (
-                                            <span aria-hidden="true">
-                                                <EmojiMedia
-                                                    url={url()}
-                                                    label={item().label}
-                                                    textColor={item().textColor}
-                                                />
-                                            </span>
-                                        )}
-                                    </Show>
-                                </button>
-                                <Show when={item().current}>
-                                    <span
-                                        id={`${props.kind}-current-${id}`}
-                                        class="pointer-events-none absolute inset-s-1 top-1 grid size-5 place-items-center rounded-md bg-accent text-accent-foreground shadow-sm"
-                                    >
-                                        <svg
-                                            aria-hidden="true"
-                                            class="size-3.5 fill-none stroke-current stroke-2"
-                                            viewBox="0 0 16 16"
+                                        <Show
+                                            when={item().mediaUrl}
+                                            fallback={
+                                                <Show
+                                                    when={item().imageUrl}
+                                                    fallback={
+                                                        <span class="sortable-fallback max-w-full truncate text-sm">
+                                                            {item().label}
+                                                        </span>
+                                                    }
+                                                >
+                                                    {(url) => (
+                                                        <img
+                                                            src={url()}
+                                                            alt=""
+                                                            loading="lazy"
+                                                            draggable="false"
+                                                        />
+                                                    )}
+                                                </Show>
+                                            }
                                         >
-                                            <path d="m3 8 3 3 7-7" />
-                                        </svg>
-                                        <span class="visually-hidden sr-only">
-                                            {t("currentPhoto")}
-                                        </span>
-                                    </span>
-                                </Show>
-                                <Show when={item().badge}>
-                                    {(badge) => (
+                                            {(url) => (
+                                                <span aria-hidden="true">
+                                                    <EmojiMedia
+                                                        url={url()}
+                                                        label={item().label}
+                                                        textColor={item().textColor}
+                                                    />
+                                                </span>
+                                            )}
+                                        </Show>
+                                    </button>
+                                    <Show when={item().current}>
                                         <span
-                                            id={`${props.kind}-badge-${id}`}
-                                            class="pointer-events-none absolute inset-e-1 bottom-1 grid size-5 place-items-center rounded-md border border-border bg-surface text-foreground shadow-sm"
+                                            id={`${props.kind}-current-${id}`}
+                                            class="pointer-events-none absolute inset-s-1 top-1 grid size-5 place-items-center rounded-md bg-accent text-accent-foreground shadow-sm"
                                         >
                                             <svg
                                                 aria-hidden="true"
                                                 class="size-3.5 fill-none stroke-current stroke-2"
                                                 viewBox="0 0 16 16"
                                             >
-                                                <path d={photoStatusIcons[badge()]} />
+                                                <path d="m3 8 3 3 7-7" />
                                             </svg>
                                             <span class="visually-hidden sr-only">
-                                                {t(badge())}
+                                                {t("currentPhoto")}
                                             </span>
                                         </span>
-                                    )}
-                                </Show>
-                                <Show when={props.edit}>
+                                    </Show>
+                                    <Show when={item().badge}>
+                                        {(badge) => (
+                                            <span
+                                                id={`${props.kind}-badge-${id}`}
+                                                class="pointer-events-none absolute inset-e-1 bottom-1 grid size-5 place-items-center rounded-md border border-border bg-surface text-foreground shadow-sm"
+                                            >
+                                                <svg
+                                                    aria-hidden="true"
+                                                    class="size-3.5 fill-none stroke-current stroke-2"
+                                                    viewBox="0 0 16 16"
+                                                >
+                                                    <path d={photoStatusIcons[badge()]} />
+                                                </svg>
+                                                <span class="visually-hidden sr-only">
+                                                    {t(badge())}
+                                                </span>
+                                            </span>
+                                        )}
+                                    </Show>
+                                    <Show when={props.edit}>
+                                        <button
+                                            type="button"
+                                            class="sortable-edit shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                            aria-label={t("cropPhoto", { name: item().label })}
+                                            disabled={props.busy}
+                                            onClick={(event) =>
+                                                props.edit?.(id, event.currentTarget)
+                                            }
+                                        >
+                                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                                                <path d="M6 3v12a3 3 0 0 0 3 3h12M3 6h12a3 3 0 0 1 3 3v12" />
+                                            </svg>
+                                        </button>
+                                    </Show>
                                     <button
                                         type="button"
-                                        class="sortable-edit shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
-                                        aria-label={t("cropPhoto", { name: item().label })}
+                                        class="sortable-remove shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                        aria-label={
+                                            item().removeLabel ??
+                                            (props.kind === "photo"
+                                                ? t("reorderRemovePhoto", { name: item().label })
+                                                : t("reorderRemoveEmoji", { name: item().label }))
+                                        }
                                         disabled={props.busy}
-                                        onClick={(event) => props.edit?.(id, event.currentTarget)}
+                                        onClick={() => {
+                                            setPicked(undefined);
+                                            props.remove(id);
+                                        }}
                                     >
-                                        <svg aria-hidden="true" viewBox="0 0 24 24">
-                                            <path d="M6 3v12a3 3 0 0 0 3 3h12M3 6h12a3 3 0 0 1 3 3v12" />
+                                        <svg aria-hidden="true" viewBox="0 0 16 16">
+                                            <path d="M4 4l8 8M12 4l-8 8" />
                                         </svg>
                                     </button>
-                                </Show>
-                                <button
-                                    type="button"
-                                    class="sortable-remove shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
-                                    aria-label={
-                                        item().removeLabel ??
-                                        (props.kind === "photo"
-                                            ? t("reorderRemovePhoto", { name: item().label })
-                                            : t("reorderRemoveEmoji", { name: item().label }))
-                                    }
-                                    disabled={props.busy}
-                                    onClick={() => {
-                                        setPicked(undefined);
-                                        props.remove(id);
-                                    }}
-                                >
-                                    <svg aria-hidden="true" viewBox="0 0 16 16">
-                                        <path d="M4 4l8 8M12 4l-8 8" />
-                                    </svg>
-                                </button>
+                                </div>
                             </li>
                         );
                     }}

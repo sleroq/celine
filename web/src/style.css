@@ -350,6 +350,7 @@ input[aria-invalid="true"] {
     background: var(--ui-surface);
 }
 .emoji-add[aria-expanded="true"] {
+    border: 1px solid var(--ui-accent);
     color: var(--ui-accent);
     background: var(--ui-muted);
 }
@@ -371,7 +372,7 @@ input[aria-invalid="true"] {
     width: 100%;
     height: min(400px, 60dvh);
     padding: 0.75rem;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     border-radius: 0.75rem;
     color: var(--ui-foreground);
     background: var(--ui-surface);
@@ -755,6 +756,8 @@ input[type="number"] {
 .photo-browser summary {
     cursor: pointer;
     padding-block: 0.375rem;
+    -webkit-user-select: none;
+    user-select: none;
 }
 .photo-history {
     max-height: min(360px, 50dvh);
@@ -794,22 +797,6 @@ input[type="number"] {
 }
 .photo-choice img.photo-loading {
     visibility: hidden;
-}
-.photo-choice-pin {
-    position: absolute;
-    z-index: 1;
-    inset-block-start: 0.125rem;
-    inset-inline-start: 0.125rem;
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    color: black;
-    pointer-events: none;
-}
-.photo-choice-pin svg {
-    width: 20px;
-    height: 20px;
 }
 .photo-choice:has(input:checked) img {
     outline: 3px solid Highlight;
@@ -879,7 +866,7 @@ input[type="number"] {
     }
 }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .sortable-handle,
+    .sortable-surface,
     .photo-choice,
     .emoji-choice {
         transform: perspective(220px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));

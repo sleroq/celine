@@ -40,6 +40,7 @@ pub enum EmojiSource {
     Recent,
     Default,
     Pack,
+    Search,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -53,6 +54,44 @@ pub struct EmojiChoice {
     pub thumbnail_url: Option<String>,
     #[serde(default)]
     pub text_color: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmojiSearch {
+    pub q: String,
+    #[serde(default)]
+    pub emoticon: String,
+    pub lang: Option<String>,
+    #[serde(default)]
+    pub offset: i32,
+}
+
+impl EmojiSearch {
+    fn request(&self) -> tl::functions::messages::SearchStickers {
+        tl::functions::messages::SearchStickers {
+            emojis: true,
+            q: self.q.trim().into(),
+            emoticon: self.emoticon.clone(),
+            lang_code: self
+                .lang
+                .as_deref()
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|language| !language.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            offset: self.offset,
+            limit: 100,
+            hash: 0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct EmojiSearchResults {
+    pub choices: Vec<EmojiChoice>,
+    pub next_offset: Option<i32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -800,6 +839,49 @@ impl Telegram {
                 })
             })
             .collect())
+    }
+
+    pub async fn search_emojis(
+        &mut self,
+        search: &EmojiSearch,
+    ) -> Result<EmojiSearchResults, TelegramError> {
+        self.require_available()?;
+        self.require_authorized()?;
+        let result = self
+            .connection
+            .client()
+            .invoke(&search.request())
+            .await
+            .map_err(|error| self.handle_error(error))?;
+        Ok(self.emoji_search_results(result))
+    }
+
+    fn emoji_search_results(
+        &mut self,
+        result: tl::enums::messages::FoundStickers,
+    ) -> EmojiSearchResults {
+        let tl::enums::messages::FoundStickers::Stickers(found) = result else {
+            return EmojiSearchResults {
+                choices: Vec::new(),
+                next_offset: None,
+            };
+        };
+        let choices = found
+            .stickers
+            .into_iter()
+            .filter_map(|document| match document {
+                tl::enums::Document::Document(document) => {
+                    let mut choice = self.emoji_choice(document, "Search");
+                    choice.source_kind = Some(EmojiSource::Search);
+                    Some(choice)
+                }
+                tl::enums::Document::Empty(_) => None,
+            })
+            .collect();
+        EmojiSearchResults {
+            choices,
+            next_offset: found.next_offset,
+        }
     }
 
     pub async fn emoji_sets(&mut self) -> Result<Vec<EmojiSet>, TelegramError> {
@@ -1738,6 +1820,84 @@ mod tests {
         };
         assert_eq!(telegram.poll_auth().await.unwrap().status, "qr_expired");
         assert_eq!(telegram.poll_auth().await.unwrap().status, "qr_expired");
+        telegram.connection.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn emoji_search_request_uses_text_languages_and_pagination() {
+        for (lang, expected) in [
+            (Some("en"), vec!["en"]),
+            (Some("ru"), vec!["ru"]),
+            (Some("uk,en"), vec!["uk", "en"]),
+            (
+                Some("ja-JP,zh-Hant,en-US,en"),
+                vec!["ja-JP", "zh-Hant", "en-US", "en"],
+            ),
+            (Some(" de-DE, ,fr-CA, en "), vec!["de-DE", "fr-CA", "en"]),
+            (Some(""), vec![]),
+            (None, vec![]),
+        ] {
+            let search: EmojiSearch = serde_json::from_value(serde_json::json!({
+                "q": "  happy cat  ", "lang": lang, "offset": 100
+            }))
+            .unwrap();
+            let request = search.request();
+            assert!(request.emojis);
+            assert_eq!(request.q, "happy cat");
+            assert!(request.emoticon.is_empty());
+            assert_eq!(request.lang_code, expected);
+            assert_eq!(request.offset, 100);
+            assert_eq!(request.limit, 100);
+            assert_eq!(request.hash, 0);
+        }
+        let search: EmojiSearch = serde_json::from_value(serde_json::json!({"q": "cat"})).unwrap();
+        assert_eq!(search.offset, 0);
+        assert!(search.request().lang_code.is_empty());
+        assert!(search.request().emoticon.is_empty());
+        let search: EmojiSearch = serde_json::from_value(serde_json::json!({
+            "q": "", "emoticon": "😀 👩‍💻", "lang": "en"
+        }))
+        .unwrap();
+        assert_eq!(search.request().emoticon, "😀 👩‍💻");
+        assert!(search.request().q.is_empty());
+    }
+
+    #[tokio::test]
+    async fn emoji_search_registers_documents_and_preserves_next_offset() {
+        let (_dir, mut telegram) = offline_telegram().await;
+        let results = telegram.emoji_search_results(
+            tl::types::messages::FoundStickers {
+                next_offset: Some(100),
+                hash: 0,
+                stickers: vec![
+                    emoji_document(i64::MAX, "application/x-tgsticker").into(),
+                    tl::types::DocumentEmpty { id: 1 }.into(),
+                ],
+            }
+            .into(),
+        );
+        assert_eq!(results.next_offset, Some(100));
+        assert_eq!(results.choices.len(), 1);
+        let choice = &results.choices[0];
+        assert_eq!(choice.id, i64::MAX.to_string());
+        assert_eq!(choice.label, "Star");
+        assert!(choice.text_color);
+        assert!(matches!(choice.source_kind, Some(EmojiSource::Search)));
+        assert_eq!(
+            serde_json::to_value(choice).unwrap()["source_kind"],
+            "search"
+        );
+        assert!(telegram.documents.contains_key(&i64::MAX));
+        let results = telegram.emoji_search_results(
+            tl::types::messages::FoundStickers {
+                next_offset: None,
+                hash: 0,
+                stickers: Vec::new(),
+            }
+            .into(),
+        );
+        assert!(results.choices.is_empty());
+        assert_eq!(results.next_offset, None);
         telegram.connection.shutdown().await.unwrap();
     }
 

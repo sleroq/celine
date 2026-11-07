@@ -1,3 +1,4 @@
+import { emojiDisplayName, photoDisplayName } from "./display-names";
 import { createEffect, createSignal, For, onCleanup, onSettled, Show, untrack } from "solid-js";
 import { accountApi, reconcilePhotoOrder, RequestError, request, timeRemaining } from "./api";
 import type { AccountApi, EmojiChoice, Settings, State } from "./api";
@@ -5,6 +6,7 @@ import { AccountMenu, Login, type Actions } from "./Accounts";
 import { Duration } from "./duration";
 import { createAutosave } from "./autosave";
 import { createEmojiPacks } from "./emoji-packs";
+import { createEmojiSearch } from "./emoji-search";
 import { EmojiMedia } from "./EmojiMedia";
 import { PhotoDialog } from "./PhotoDialog";
 import { photoMatchMessage } from "./photo-status";
@@ -577,7 +579,7 @@ function Photos(
                 reorder={reorder}
                 items={photos().map((photo) => ({
                     id: photo.id,
-                    label: photo.generated_name ? t("telegramPhotoName") : photo.name,
+                    label: photoDisplayName(photo),
                     imageUrl: props.api.selectedPhotoUrl(photo),
                     reorderLabel: photo.generated_name ? t("reorderTelegramPhoto") : undefined,
                     removeLabel: photo.generated_name ? t("removeTelegramPhoto") : undefined,
@@ -751,20 +753,6 @@ function PhotoChoice(props: {
                     props.toggle();
                 }}
             />
-            <Show when={props.checked}>
-                <span class="photo-choice-pin" aria-hidden="true">
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path d="M12 13v9M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5Z" />
-                    </svg>
-                </span>
-            </Show>
             <Show when={loading()}>
                 <span class="photo-skeleton" aria-hidden="true" />
             </Show>
@@ -1109,7 +1097,70 @@ function Rotation(
 function emojiSource(emoji: EmojiChoice): string {
     if (emoji.source_kind === "recent") return t("emojiSourceRecent");
     if (emoji.source_kind === "default") return t("emojiSourceDefault");
+    if (emoji.source_kind === "search") return t("emojiSearchResults");
     return emoji.source;
+}
+
+function EmojiChoices(props: {
+    choices: EmojiChoice[];
+    api: AccountApi;
+    selected: string[];
+    busy: boolean;
+    toggle: (id: string) => void;
+}) {
+    return (
+        <div class="emojis">
+            <For each={props.choices}>
+                {(emoji) => (
+                    <label
+                        class="emoji-choice"
+                        title={emojiSource(emoji)}
+                        onPointerMove={tilt}
+                        onPointerLeave={resetTilt}
+                        onPointerCancel={resetTilt}
+                    >
+                        <input
+                            type="checkbox"
+                            aria-label={`${emojiDisplayName(emoji.label)} (${emojiSource(emoji)})`}
+                            checked={props.selected.includes(emoji.id)}
+                            disabled={props.busy}
+                            onChange={() => props.toggle(emoji.id)}
+                        />
+                        <span class="emoji-preview" aria-hidden="true">
+                            <EmojiMedia
+                                url={props.api.emojiMediaUrl(emoji.id)}
+                                label={emojiDisplayName(emoji.label)}
+                                textColor={emoji.text_color}
+                            />
+                        </span>
+                    </label>
+                )}
+            </For>
+        </div>
+    );
+}
+
+function EmojiSearchMore(props: { loadMore: () => void }) {
+    let sentinel!: HTMLDivElement;
+    onSettled(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) props.loadMore();
+            },
+            { root: sentinel.parentElement, rootMargin: "0px 0px 160px" },
+        );
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    });
+    return (
+        <div
+            class="h-px"
+            aria-hidden="true"
+            ref={(element) => {
+                sentinel = element;
+            }}
+        />
+    );
 }
 
 function EmojiPicker(
@@ -1123,6 +1174,7 @@ function EmojiPicker(
 ) {
     // The keyed account workspace owns this catalog for the lifetime of its account API.
     const packs = untrack(() => createEmojiPacks(props.api));
+    const search = untrack(() => createEmojiSearch(props.api));
     const [pickerOpen, setPickerOpen] = createSignal(false);
     let addButton!: HTMLButtonElement;
     const selected = () => props.autosave.draft() ?? props.selected;
@@ -1155,9 +1207,17 @@ function EmojiPicker(
     }
 
     function closePicker() {
+        search.setQuery("");
         setPickerOpen(false);
         addButton.focus();
     }
+
+    function selectPack(id: string) {
+        search.setQuery("");
+        void packs.select(id);
+    }
+
+    onCleanup(search.dispose);
 
     return (
         <section aria-label={t("emojiStatus")}>
@@ -1169,10 +1229,12 @@ function EmojiPicker(
                     remove={toggle}
                     items={selected().map((id) => {
                         const choice =
-                            packs.find(id) ?? props.selectedEmojis.find((emoji) => emoji.id === id);
+                            packs.find(id) ??
+                            search.find(id) ??
+                            props.selectedEmojis.find((emoji) => emoji.id === id);
                         return {
                             id,
-                            label: choice?.label ?? id,
+                            label: emojiDisplayName(choice?.label ?? id),
                             mediaUrl: props.api.emojiMediaUrl(id),
                             textColor: choice?.text_color,
                         };
@@ -1187,7 +1249,7 @@ function EmojiPicker(
                             ref={(element) => {
                                 addButton = element;
                             }}
-                            onClick={() => setPickerOpen(!pickerOpen())}
+                            onClick={() => (pickerOpen() ? closePicker() : setPickerOpen(true))}
                         >
                             <svg aria-hidden="true" viewBox="0 0 24 24">
                                 <path d="M12 5v14M5 12h14" />
@@ -1202,18 +1264,30 @@ function EmojiPicker(
                     onKeyDown={(event) => {
                         if (event.key === "Escape") {
                             event.preventDefault();
-                            closePicker();
+                            if (search.query) search.setQuery("");
+                            else closePicker();
                         }
                     }}
                 >
+                    <TextField class="mb-3">
+                        <TextFieldLabel class="visually-hidden">{t("searchEmoji")}</TextFieldLabel>
+                        <TextFieldInput
+                            type="search"
+                            placeholder={t("searchEmoji")}
+                            value={search.query}
+                            onInput={(event) => search.setQuery(event.currentTarget.value)}
+                        />
+                    </TextField>
                     <nav class="emoji-packs" aria-label={t("emojiPacks")}>
                         <button
                             type="button"
                             aria-label={t("recentDefault")}
                             title={t("recentDefault")}
-                            aria-pressed={packs.activeId === "" ? "true" : "false"}
+                            aria-pressed={
+                                !search.query.trim() && packs.activeId === "" ? "true" : "false"
+                            }
                             aria-controls="emoji-pack-choices"
-                            onClick={() => void packs.select("")}
+                            onClick={() => selectPack("")}
                         >
                             <svg class="pack-glyph" aria-hidden="true" viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="8" />
@@ -1226,9 +1300,13 @@ function EmojiPicker(
                                     type="button"
                                     aria-label={set.title}
                                     title={set.title}
-                                    aria-pressed={packs.activeId === set.id ? "true" : "false"}
+                                    aria-pressed={
+                                        !search.query.trim() && packs.activeId === set.id
+                                            ? "true"
+                                            : "false"
+                                    }
                                     aria-controls="emoji-pack-choices"
-                                    onClick={() => void packs.select(set.id)}
+                                    onClick={() => selectPack(set.id)}
                                 >
                                     <span aria-hidden="true">
                                         <EmojiMedia
@@ -1266,112 +1344,138 @@ function EmojiPicker(
                         id="emoji-pack-choices"
                         role="region"
                         aria-labelledby="emoji-pack-title"
-                        aria-busy={packs.active?.loading ? "true" : "false"}
+                        aria-busy={
+                            (search.query.trim() ? search.state.loading : packs.active?.loading)
+                                ? "true"
+                                : "false"
+                        }
                     >
-                        <div class="flex items-center justify-between gap-2">
-                            <h2 id="emoji-pack-title" class="text-base">
-                                {packs.title}
-                            </h2>
-                            <Show when={!packs.activeId}>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    class="aria-disabled:opacity-55"
-                                    aria-disabled={packs.active?.loading ? "true" : undefined}
-                                    onClick={() => void packs.select("")}
-                                >
-                                    {t("refreshEmojiStatuses")}
-                                </Button>
-                            </Show>
-                        </div>
-                        <Show when={!packs.active || packs.active.loading}>
-                            <p class="visually-hidden" role="status">
-                                {t("loadingEmoji")}
-                            </p>
-                            <div class="emojis" aria-hidden="true">
-                                <For
-                                    each={Array.from(
-                                        { length: Math.min(packs.count || 24, 36) },
-                                        (_, index) => index,
-                                    )}
-                                >
-                                    {() => (
-                                        <span class="emoji-preview">
-                                            <span class="emoji-skeleton" />
-                                        </span>
-                                    )}
-                                </For>
+                        <Show when={!search.query.trim()}>
+                            <div class="flex items-center justify-between gap-2">
+                                <h2 id="emoji-pack-title" class="text-base">
+                                    {packs.title}
+                                </h2>
+                                <Show when={!packs.activeId}>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        class="aria-disabled:opacity-55"
+                                        aria-disabled={packs.active?.loading ? "true" : undefined}
+                                        onClick={() => void packs.select("")}
+                                    >
+                                        {t("refreshEmojiStatuses")}
+                                    </Button>
+                                </Show>
                             </div>
-                        </Show>
-                        <Show when={packs.active?.error}>
-                            <button type="button" onClick={() => void packs.select()}>
-                                {t("retry")}
-                            </button>
-                        </Show>
-                        <Show when={packs.active?.choices}>
-                            <For each={packs.groups}>
-                                {(group) => (
-                                    <section>
-                                        <Show when={group.kind !== "pack"}>
-                                            <h3 class="mt-4 mb-1 text-sm font-semibold text-muted-foreground">
-                                                {t(
-                                                    group.kind === "recent"
-                                                        ? "recentEmojiStatuses"
-                                                        : "suggestedEmojiStatuses",
-                                                )}
-                                            </h3>
-                                        </Show>
-                                        <Show
-                                            when={group.choices.length}
-                                            fallback={
-                                                <p class="hint">
+                            <Show when={!packs.active || packs.active.loading}>
+                                <p class="visually-hidden" role="status">
+                                    {t("loadingEmoji")}
+                                </p>
+                                <div class="emojis" aria-hidden="true">
+                                    <For
+                                        each={Array.from(
+                                            { length: Math.min(packs.count || 24, 36) },
+                                            (_, index) => index,
+                                        )}
+                                    >
+                                        {() => (
+                                            <span class="emoji-preview">
+                                                <span class="emoji-skeleton" />
+                                            </span>
+                                        )}
+                                    </For>
+                                </div>
+                            </Show>
+                            <Show when={packs.active?.error}>
+                                <button type="button" onClick={() => void packs.select()}>
+                                    {t("retry")}
+                                </button>
+                            </Show>
+                            <Show when={packs.active?.choices}>
+                                <For each={packs.groups}>
+                                    {(group) => (
+                                        <section>
+                                            <Show when={group.kind !== "pack"}>
+                                                <h3 class="mt-4 mb-1 text-sm font-semibold text-muted-foreground">
                                                     {t(
                                                         group.kind === "recent"
-                                                            ? "emptyRecentEmojiStatuses"
-                                                            : "emptyEmojiPack",
+                                                            ? "recentEmojiStatuses"
+                                                            : "suggestedEmojiStatuses",
                                                     )}
-                                                </p>
-                                            }
-                                        >
-                                            <div class="emojis">
-                                                <For each={group.choices}>
-                                                    {(emoji) => (
-                                                        <label
-                                                            class="emoji-choice"
-                                                            title={emojiSource(emoji)}
-                                                            onPointerMove={tilt}
-                                                            onPointerLeave={resetTilt}
-                                                            onPointerCancel={resetTilt}
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                aria-label={`${emoji.label} (${emojiSource(emoji)})`}
-                                                                checked={selected().includes(
-                                                                    emoji.id,
-                                                                )}
-                                                                disabled={props.busy}
-                                                                onChange={() => toggle(emoji.id)}
-                                                            />
-                                                            <span
-                                                                class="emoji-preview"
-                                                                aria-hidden="true"
-                                                            >
-                                                                <EmojiMedia
-                                                                    url={props.api.emojiMediaUrl(
-                                                                        emoji.id,
-                                                                    )}
-                                                                    label={emoji.label}
-                                                                    textColor={emoji.text_color}
-                                                                />
-                                                            </span>
-                                                        </label>
-                                                    )}
-                                                </For>
-                                            </div>
-                                        </Show>
-                                    </section>
-                                )}
-                            </For>
+                                                </h3>
+                                            </Show>
+                                            <Show
+                                                when={group.choices.length}
+                                                fallback={
+                                                    <p class="hint">
+                                                        {t(
+                                                            group.kind === "recent"
+                                                                ? "emptyRecentEmojiStatuses"
+                                                                : "emptyEmojiPack",
+                                                        )}
+                                                    </p>
+                                                }
+                                            >
+                                                <EmojiChoices
+                                                    choices={group.choices}
+                                                    api={props.api}
+                                                    selected={selected()}
+                                                    busy={props.busy}
+                                                    toggle={toggle}
+                                                />
+                                            </Show>
+                                        </section>
+                                    )}
+                                </For>
+                            </Show>
+                        </Show>
+                        <Show when={search.query.trim()}>
+                            <h2 id="emoji-pack-title" class="text-base">
+                                {t("emojiSearchResults")}
+                            </h2>
+                            <Show when={search.state.choices.length}>
+                                <EmojiChoices
+                                    choices={search.state.choices}
+                                    api={props.api}
+                                    selected={selected()}
+                                    busy={props.busy}
+                                    toggle={toggle}
+                                />
+                            </Show>
+                            <Show when={search.state.loading}>
+                                <p class="hint" role="status">
+                                    {t("loadingEmoji")}
+                                </p>
+                            </Show>
+                            <Show when={search.state.error}>
+                                <p class="hint" role="status">
+                                    {search.state.error}
+                                </p>
+                                <Button variant="secondary" size="sm" onClick={search.retry}>
+                                    {t("retry")}
+                                </Button>
+                            </Show>
+                            <Show
+                                when={
+                                    !search.state.loading &&
+                                    !search.state.error &&
+                                    search.state.nextOffset == null &&
+                                    !search.state.choices.length
+                                }
+                            >
+                                <p class="hint" role="status">
+                                    {t("emojiSearchEmpty")}
+                                </p>
+                            </Show>
+                            <Show
+                                when={
+                                    search.state.nextOffset != null &&
+                                    !search.state.loading &&
+                                    !search.state.error
+                                }
+                            >
+                                <EmojiSearchMore loadMore={search.loadMore} />
+                            </Show>
                         </Show>
                     </div>
                 </div>

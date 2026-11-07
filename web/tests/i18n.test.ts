@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { messages, resolveLocale, translate, translateServerMessage } from "../src/i18n";
 import { serverMessages } from "../src/server-messages";
 
@@ -49,6 +51,22 @@ describe("translation catalogs", () => {
                 true,
             );
         }
+    });
+
+    test("cover message codes declared by the backend", () => {
+        const source = new URL("../../src/", import.meta.url);
+        const files = new Bun.Glob("**/*.rs").scanSync({ cwd: fileURLToPath(source) });
+        const codes = new Set<string>();
+        for (const file of files) {
+            const content = readFileSync(new URL(file, source), "utf8");
+            for (const match of content.matchAll(
+                /\b(?:Message|MessageInfo)::new\(\s*"([a-z_]+\.[a-z_]+)"/g,
+            )) {
+                codes.add(match[1]);
+            }
+        }
+        expect(codes.size).toBeGreaterThan(0);
+        expect([...codes].filter((code) => !Object.hasOwn(serverMessages.en, code))).toEqual([]);
     });
 
     test("translate server messages, opaque hints, cooldowns, and rotation context", () => {

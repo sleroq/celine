@@ -1,3 +1,4 @@
+import { emojiDisplayName } from "./display-names";
 import { createEffect, Show } from "solid-js";
 import type { Profile } from "./api";
 import { EmojiMedia } from "./EmojiMedia";
@@ -39,7 +40,7 @@ export function ProfileHeader(props: { profile?: Profile | null; name: string; n
                     <span class="profile-emoji">
                         <EmojiMedia
                             url={current().media_url}
-                            label={current().label}
+                            label={emojiDisplayName(current().label)}
                             textColor={current().text_color}
                             revision={props.profile?.updated_at}
                         />

@@ -12,6 +12,7 @@ const en = {
         "Pack cover unavailable. Refresh the emoji catalog to reload previews.",
     "emoji.cover_unavailable": "Pack cover unavailable.",
     "emoji.media_unavailable": "Emoji media unavailable.",
+    "emoji.search_invalid_offset": "Search offset must be nonnegative.",
     "emoji.thumbnail_refresh_required":
         "Thumbnail unavailable. Refresh the emoji catalog to reload previews.",
     "emoji.thumbnail_unavailable": "Thumbnail unavailable.",
@@ -60,7 +61,7 @@ const en = {
     "telegram.photo_decode_failed": "Cannot decode Telegram’s profile photo.",
     "telegram.photo_history_too_large": "Telegram photo history is too large.",
     "telegram.photo_id_invalid": "Invalid Telegram photo ID.",
-    "telegram.photo_matching_decode_failed": "Cannot decode the profile photo for matching.",
+    "telegram.photo_unavailable": "Cannot download a Telegram profile photo.",
     "telegram.photo_upload_failed": "Cannot upload the profile photo to Telegram.",
     "telegram.photo_upload_id_missing": "Telegram returned no uploaded photo ID.",
     "telegram.premium_required": "Telegram Premium is required for emoji statuses.",
@@ -84,6 +85,7 @@ const en = {
     "upload.read_failed": "Cannot read upload. Maximum request size is 12 MiB.",
     "upload.too_large": "Photos must be at most 10 MiB.",
     "upload.too_small": "Photos must be at least 160 × 160 pixels.",
+    "validation.crop": "Choose a square crop within the image.",
     "validation.emoji_selection_required": "Select at least one emoji before starting rotation.",
     "validation.interval_positive": "Choose a positive interval in seconds.",
     "validation.jitter_smaller":
@@ -106,6 +108,7 @@ const ru = {
         "Обложка набора недоступна. Обновите каталог эмодзи, чтобы перезагрузить превью.",
     "emoji.cover_unavailable": "Обложка набора недоступна.",
     "emoji.media_unavailable": "Медиафайл эмодзи недоступен.",
+    "emoji.search_invalid_offset": "Смещение поиска не может быть отрицательным.",
     "emoji.thumbnail_refresh_required":
         "Миниатюра недоступна. Обновите каталог эмодзи, чтобы перезагрузить превью.",
     "emoji.thumbnail_unavailable": "Миниатюра недоступна.",
@@ -157,7 +160,7 @@ const ru = {
     "telegram.photo_decode_failed": "Не удалось прочитать фото профиля Telegram.",
     "telegram.photo_history_too_large": "История фото Telegram слишком велика.",
     "telegram.photo_id_invalid": "Недопустимый ID фото Telegram.",
-    "telegram.photo_matching_decode_failed": "Не удалось прочитать фото профиля для сравнения.",
+    "telegram.photo_unavailable": "Не удалось скачать фото профиля из Telegram.",
     "telegram.photo_upload_failed": "Не удалось загрузить фото профиля в Telegram.",
     "telegram.photo_upload_id_missing": "Telegram не вернул ID загруженного фото.",
     "telegram.premium_required": "Для эмодзи-статусов нужен Telegram Premium.",
@@ -185,6 +188,7 @@ const ru = {
     "upload.read_failed": "Не удалось прочитать загрузку. Максимальный размер запроса — 12 МиБ.",
     "upload.too_large": "Размер фото не должен превышать 10 МиБ.",
     "upload.too_small": "Размер фото должен быть не меньше 160 × 160 пикселей.",
+    "validation.crop": "Выберите квадратную область внутри изображения.",
     "validation.emoji_selection_required": "Выберите хотя бы один эмодзи перед запуском смены.",
     "validation.interval_positive": "Укажите интервал больше нуля в секундах.",
     "validation.jitter_smaller":
@@ -208,6 +212,7 @@ const uk = {
         "Обкладинка набору недоступна. Оновіть каталог емодзі, щоб перезавантажити прев’ю.",
     "emoji.cover_unavailable": "Обкладинка набору недоступна.",
     "emoji.media_unavailable": "Медіафайл емодзі недоступний.",
+    "emoji.search_invalid_offset": "Зсув пошуку не може бути від’ємним.",
     "emoji.thumbnail_refresh_required":
         "Мініатюра недоступна. Оновіть каталог емодзі, щоб перезавантажити прев’ю.",
     "emoji.thumbnail_unavailable": "Мініатюра недоступна.",
@@ -258,7 +263,7 @@ const uk = {
     "telegram.photo_decode_failed": "Не вдалося прочитати фото профілю Telegram.",
     "telegram.photo_history_too_large": "Історія фото Telegram завелика.",
     "telegram.photo_id_invalid": "Недійсний ID фото Telegram.",
-    "telegram.photo_matching_decode_failed": "Не вдалося прочитати фото профілю для порівняння.",
+    "telegram.photo_unavailable": "Не вдалося завантажити фото профілю з Telegram.",
     "telegram.photo_upload_failed": "Не вдалося завантажити фото профілю в Telegram.",
     "telegram.photo_upload_id_missing": "Telegram не повернув ID завантаженого фото.",
     "telegram.premium_required": "Для емодзі-статусів потрібен Telegram Premium.",
@@ -286,6 +291,7 @@ const uk = {
     "upload.read_failed": "Не вдалося прочитати завантаження. Максимальний розмір запиту — 12 МіБ.",
     "upload.too_large": "Розмір фото не має перевищувати 10 МіБ.",
     "upload.too_small": "Розмір фото має бути не менше 160 × 160 пікселів.",
+    "validation.crop": "Виберіть квадратну область у межах зображення.",
     "validation.emoji_selection_required": "Виберіть хоча б один емодзі перед запуском зміни.",
     "validation.interval_positive": "Укажіть інтервал більше нуля в секундах.",
     "validation.jitter_smaller":
