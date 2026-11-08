@@ -46,9 +46,7 @@ render(
         <>
             <header class="preview-banner">
                 <strong>Celine preview</strong>
-                <span>
-                    Edits stay in memory and reset on reload.
-                </span>
+                <span>Edits stay in memory and reset on reload.</span>
                 <nav aria-label="Preview links">
                     <a href="https://github.com/sleroq/celine">GitHub</a>
                     <a href="https://github.com/sleroq/celine/releases">Download</a>
