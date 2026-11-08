@@ -47,8 +47,7 @@ render(
             <header class="preview-banner">
                 <strong>Celine preview</strong>
                 <span>
-                    Public account snapshot, shared with permission. Edits stay in memory and reset
-                    on reload. No Telegram connection.
+                    Edits stay in memory and reset on reload.
                 </span>
                 <nav aria-label="Preview links">
                     <a href="https://github.com/sleroq/celine">GitHub</a>

@@ -174,6 +174,9 @@ export async function exportPreview(
             },
         });
     }
+    snapshot.accounts.sort(
+        (a, b) => Number(b.state.profile?.name === "sl") - Number(a.state.profile?.name === "sl"),
+    );
     await writeFile(new URL("snapshot.json", output), JSON.stringify(snapshot, null, 2) + "\n");
     console.log(
         `Exported ${snapshot.accounts.length} public accounts (${snapshot.accounts.map((a) => a.state.photos.length).join(", ")} photos).`,

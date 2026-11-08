@@ -34,13 +34,15 @@ test("preview isolates all API paths and settings mutations from the network", a
     try {
         const initial = await (await fetch("/api/state")).json();
         expect(initial.auth.status).toBe("authorized");
-        expect(initial.profile.name).toBe(snapshot.accounts[0]!.state.profile!.name);
+        expect(initial.profile.name).toBe("sl");
         expect(initial.accounts).toHaveLength(2);
+        const firstId = snapshot.accounts[0]!.state.active_account_id;
+        const secondId = snapshot.accounts[1]!.state.active_account_id;
 
         const edited = { ...schedule, interval_secs: 7200 };
         expect(
             (
-                await fetch("/api/accounts/preview-1/settings", {
+                await fetch(`/api/accounts/${firstId}/settings`, {
                     method: "PUT",
                     body: JSON.stringify(edited),
                 })
@@ -54,14 +56,14 @@ test("preview isolates all API paths and settings mutations from the network", a
         expect((await fetch("https://other.example/api/auth", { method: "POST" })).ok).toBe(false);
         expect((await fetch("/celine/api/unknown")).ok).toBe(false);
         expect(network).toBe(0);
-        await fetch("/api/accounts/preview-2/active", { method: "PUT" });
+        await fetch(`/api/accounts/${secondId}/active`, { method: "PUT" });
         const second = await (await fetch("/api/state")).json();
-        expect(second.active_account_id).toBe("preview-2");
+        expect(second.active_account_id).toBe(secondId);
         expect(second.settings.interval_secs).toBe(
             snapshot.accounts[1]!.state.settings.interval_secs,
         );
         expect(
-            (await (await fetch("/api/accounts/preview-1/state")).json()).settings.interval_secs,
+            (await (await fetch(`/api/accounts/${firstId}/state`)).json()).settings.interval_secs,
         ).toBe(7200);
         await fetch("/celine/assets/test.js");
         expect(network).toBe(1);
