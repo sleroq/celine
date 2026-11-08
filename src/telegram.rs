@@ -1754,7 +1754,9 @@ fn appearance_colors(colors: tl::enums::help::PeerColors) -> Vec<serde_json::Val
     fn swatches(set: Option<tl::enums::help::PeerColorSet>) -> (Vec<i32>, Vec<i32>) {
         match set {
             Some(tl::enums::help::PeerColorSet::Set(set)) => (set.colors, Vec::new()),
-            Some(tl::enums::help::PeerColorSet::PeerColorProfileSet(set)) => (set.palette_colors, set.bg_colors),
+            Some(tl::enums::help::PeerColorSet::PeerColorProfileSet(set)) => {
+                (set.palette_colors, set.bg_colors)
+            }
             None => (Vec::new(), Vec::new()),
         }
     }
@@ -1950,7 +1952,8 @@ mod tests {
                             hidden: false,
                             color_id: 42,
                             colors: Some(profile_set(0x123456, vec![0x111111, 0x222222])),
-                            dark_colors: has_dark.then(|| profile_set(0xabcdef, vec![0x333333, 0x444444])),
+                            dark_colors: has_dark
+                                .then(|| profile_set(0xabcdef, vec![0x333333, 0x444444])),
                             channel_min_level: None,
                             group_min_level: None,
                         },
@@ -1958,13 +1961,22 @@ mod tests {
                 },
             ));
             assert_eq!(colors[0]["colors"], serde_json::json!([0x123456]));
-            assert_eq!(colors[0]["bg_colors"], serde_json::json!([0x111111, 0x222222]));
-            assert_eq!(colors[0]["dark_colors"], serde_json::json!([if has_dark { 0xabcdef } else { 0x123456 }]));
-            assert_eq!(colors[0]["dark_bg_colors"], if has_dark {
-                serde_json::json!([0x333333, 0x444444])
-            } else {
+            assert_eq!(
+                colors[0]["bg_colors"],
                 serde_json::json!([0x111111, 0x222222])
-            });
+            );
+            assert_eq!(
+                colors[0]["dark_colors"],
+                serde_json::json!([if has_dark { 0xabcdef } else { 0x123456 }])
+            );
+            assert_eq!(
+                colors[0]["dark_bg_colors"],
+                if has_dark {
+                    serde_json::json!([0x333333, 0x444444])
+                } else {
+                    serde_json::json!([0x111111, 0x222222])
+                }
+            );
         }
     }
     #[test]

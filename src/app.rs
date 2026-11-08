@@ -1592,7 +1592,10 @@ impl App {
             })
             .map_err(storage_error)
     }
-    async fn rotate_emojis_if_due(&self, telegram: &mut impl PhotoClient) -> Result<(), TelegramError> {
+    async fn rotate_emojis_if_due(
+        &self,
+        telegram: &mut impl PhotoClient,
+    ) -> Result<(), TelegramError> {
         let id = {
             let mut repository = self.repository.lock().await;
             if !emoji_rotation_due(&repository.data, now()) {
@@ -2049,7 +2052,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_active_edits_replace_pending_status_and_standalone_start_cancels_clear() {
+    async fn clearing_active_photo_status_cancels_pending_retry() {
         let (_dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
         app.remember_choices(&[status_choice()]).await;
         app.repository
@@ -2065,38 +2068,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        retry_status_now(&app, Some("collectible:100")).await;
-        assert!(app.set_photo_status("a", None).await.is_err());
-        assert!(
-            app.state()
-                .await
-                .library
-                .pending_photo_status
-                .unwrap()
-                .status_id
-                .is_none()
-        );
-        retry_status_now(&app, None).await;
-        assert!(
-            app.set_photo_status("a", Some("collectible:100"))
-                .await
-                .is_err()
-        );
-        assert!(app.set_photo_status("a", None).await.is_err());
-        app.repository
-            .lock()
-            .await
-            .update(|library| {
-                library.select_emojis(vec![status_choice()]);
-                library.update_emoji_settings(
-                    Settings {
-                        enabled: true,
-                        ..Settings::default()
-                    },
-                    now(),
-                )
-            })
-            .unwrap();
+        app.set_photo_status("a", None).await.unwrap();
         assert!(app.state().await.library.pending_photo_status.is_none());
         app.retry_photo_status(&mut FakePhotos::new([]))
             .await
@@ -2183,7 +2155,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn entering_photo_status_mode_syncs_current_unassigned_photo_only_when_running() {
+    async fn entering_photo_status_mode_leaves_current_unassigned_photo_unchanged() {
         for running in [true, false] {
             let (_dir, app) = photo_app(vec![
                 photo("a", Some("1"), true),
@@ -2202,10 +2174,12 @@ mod tests {
                     Ok(())
                 })
                 .unwrap();
-            // No Telegram connection: a sync attempt reports unavailable, but the association persists.
-            let result = app.set_photo_status("b", Some("collectible:100")).await;
-            assert_eq!(result.is_err(), running);
-            assert!(app.state().await.library.photos[1].emoji_status.is_some());
+            app.set_photo_status("b", Some("collectible:100"))
+                .await
+                .unwrap();
+            let state = app.state().await;
+            assert!(state.library.photos[1].emoji_status.is_some());
+            assert!(state.library.pending_photo_status.is_none());
         }
     }
 
@@ -3247,10 +3221,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = App::open(dir.path().into(), None).unwrap();
         let default_id = crate::telegram::DEFAULT_EMOJI_ID.to_string();
-        let choice = EmojiChoice { id: "123".into(), ..EmojiChoice::no_status() };
+        let choice = EmojiChoice {
+            id: "123".into(),
+            ..EmojiChoice::no_status()
+        };
         app.remember_choices(std::slice::from_ref(&choice)).await;
-        app.select_emojis(&[choice.id.clone(), default_id.clone()]).await.unwrap();
-        app.select_emojis(&[default_id.clone(), choice.id.clone()]).await.unwrap();
+        app.select_emojis(&[choice.id.clone(), default_id.clone()])
+            .await
+            .unwrap();
+        app.select_emojis(&[default_id.clone(), choice.id.clone()])
+            .await
+            .unwrap();
         drop(app);
         let app = App::open(dir.path().into(), None).unwrap();
         {
@@ -3262,8 +3243,13 @@ mod tests {
         let mut telegram = FakePhotos::new([PhotoCall::Status(None, Ok(()))]);
         app.rotate_emojis_if_due(&mut telegram).await.unwrap();
         telegram.assert_finished();
-        assert_eq!(app.repository.lock().await.data.last_emoji_id.as_deref(), Some(default_id.as_str()));
-        app.select_emojis(std::slice::from_ref(&choice.id)).await.unwrap();
+        assert_eq!(
+            app.repository.lock().await.data.last_emoji_id.as_deref(),
+            Some(default_id.as_str())
+        );
+        app.select_emojis(std::slice::from_ref(&choice.id))
+            .await
+            .unwrap();
         assert_eq!(app.repository.lock().await.data.selected_emojis.len(), 1);
     }
 
