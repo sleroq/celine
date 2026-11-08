@@ -4,6 +4,8 @@
 
 Update your telegram profile automatically on schedule. Configure presets, update image / status / style together or on separate schedules.
 
+Check out [Demo](https://celine.cum.army)
+
 ![Celine profile photos, appearance editor, and appearance presets](assets/pic.jpg)
 
 ## Features
