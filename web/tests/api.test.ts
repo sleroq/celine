@@ -174,19 +174,17 @@ describe("account-scoped requests", () => {
         ).toEqual([["/api/accounts/a%2Fb/photos/history/refresh", "POST", undefined]]);
     });
 
-    test("loads and selects Telegram history photos without losing ID precision", async () => {
+    test("selects Telegram history photos without losing ID precision", async () => {
         const id = "9223372036854775806";
-        const fetch = spyOn(globalThis, "fetch")
-            .mockResolvedValueOnce(Response.json({ photos: [{ id }] }))
-            .mockResolvedValue(new Response(null, { status: 204 }));
+        const fetch = spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(null, { status: 204 }),
+        );
         const api = accountApi("a/b");
-        expect(await api.request("photos/history")).toEqual({ photos: [{ id }] });
         await api.request("photos/history", "POST", { id });
         await api.request("photos/local-id", "DELETE");
         expect(
             fetch.mock.calls.map(([url, options]) => [url, options?.method, options?.body]),
         ).toEqual([
-            ["/api/accounts/a%2Fb/photos/history", "GET", undefined],
             ["/api/accounts/a%2Fb/photos/history", "POST", JSON.stringify({ id })],
             ["/api/accounts/a%2Fb/photos/local-id", "DELETE", undefined],
         ]);

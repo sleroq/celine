@@ -86,7 +86,6 @@ export function createPreviewFetch(
                     choices: [],
                     sets: [],
                 });
-            if (path === "photos/history") return Response.json({ photos: [] });
             if (path === "emojis/search") return Response.json({ choices: [], next_offset: null });
             if (path.startsWith("emojis/sets/")) return Response.json({ choices: [] });
         }

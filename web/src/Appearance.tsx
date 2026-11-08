@@ -566,9 +566,6 @@ export function AppearancePanel(props: {
             <Show when={props.state.profile?.appearance_collectible_conflict}>
                 <p role="status">{t("appearanceCurrentConflict")}</p>
             </Show>
-            <Show when={!props.premium}>
-                <p role="status">{t("appearancePremium")}</p>
-            </Show>
             <Show when={error()}>
                 <p role="alert">{error()}</p>
                 <Button variant="secondary" onClick={() => void loadCatalog()}>

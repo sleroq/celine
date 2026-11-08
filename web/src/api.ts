@@ -188,7 +188,6 @@ export function accountApi(id: string) {
 
 function createRequest(base: string) {
     function send(path: "state"): Promise<State>;
-    function send(path: "photos/history"): Promise<{ photos: { id: string }[] }>;
     function send(path: "emojis"): Promise<Emojis>;
     function send(path: "appearance/catalog"): Promise<AppearanceCatalog>;
     function send(path: `emojis/search?${string}`): Promise<EmojiSearchResults>;
@@ -199,13 +198,7 @@ function createRequest(base: string) {
         method: "GET" | MutationMethod = "GET",
         body?: RequestBody,
     ): Promise<
-        | State
-        | AppearanceCatalog
-        | Emojis
-        | EmojiSearchResults
-        | Pick<Emojis, "choices">
-        | { photos: { id: string }[] }
-        | void
+        State | AppearanceCatalog | Emojis | EmojiSearchResults | Pick<Emojis, "choices"> | void
     > {
         const options: RequestInit = {
             method,

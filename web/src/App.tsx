@@ -1,6 +1,7 @@
 import { AppearancePanel } from "./Appearance";
 import { photoDisplayName } from "./display-names";
 import { createEffect, createSignal, For, onCleanup, onSettled, Show, untrack } from "solid-js";
+import { createAppState } from "./app-state";
 import { accountApi, reconcilePhotoOrder, RequestError, request, timeRemaining } from "./api";
 import type { AccountApi, Settings, State } from "./api";
 import { AccountMenu, Login, type Actions } from "./Accounts";
@@ -69,7 +70,7 @@ function saveLabel(key: SaveKey) {
 }
 
 export default function App() {
-    const [state, setState] = createSignal<State>();
+    const [state, setState] = createAppState();
     const [now, setNow] = createSignal(Date.now() / 1000);
     const [operation, setOperation] = createSignal<"mutation" | "reorder">();
     const [connectionError, setConnectionError] = createSignal("");
@@ -86,6 +87,7 @@ export default function App() {
             "photoSettings",
             "emojiSettings",
             "appearanceSettings",
+            "appearancePresets",
         ];
         return keys.flatMap((key) => {
             const save = saves()[key];

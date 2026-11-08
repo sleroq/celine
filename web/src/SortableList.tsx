@@ -1,5 +1,14 @@
 import { DefaultEmojiGlyph } from "./default-emoji";
-import { createEffect, createSignal, flush, For, onCleanup, onSettled, Show } from "solid-js";
+import {
+    createEffect,
+    createMemo,
+    createSignal,
+    flush,
+    For,
+    onCleanup,
+    onSettled,
+    Show,
+} from "solid-js";
 import Sortable from "sortablejs";
 import type { JSX } from "@solidjs/web";
 import { moveItem } from "./api";
@@ -57,6 +66,7 @@ export function SortableList(props: Props) {
     const [announcement, setAnnouncement] = createSignal("");
     const [picked, setPicked] = createSignal<string>();
     const ids = () => props.items.map((item) => item.id);
+    const itemsById = createMemo(() => new Map(props.items.map((item) => [item.id, item])));
     const hintId = () => `${props.kind}-reorder-hint`;
     let list!: HTMLOListElement;
     let sortable: Sortable | undefined;
@@ -164,7 +174,7 @@ export function SortableList(props: Props) {
             >
                 <For each={ids()}>
                     {(id, index) => {
-                        const item = () => props.items.find((candidate) => candidate.id === id)!;
+                        const item = () => itemsById().get(id)!;
 
                         return (
                             <li

@@ -370,49 +370,6 @@ input[aria-invalid="true"] {
     outline: 2px solid CanvasText;
     outline-offset: 2px;
 }
-.jitter summary {
-    position: relative;
-    cursor: pointer;
-    padding-block: 0.375rem;
-}
-.jitter-help {
-    display: inline-grid;
-    place-items: center;
-    width: 1.25rem;
-    height: 1.25rem;
-    margin-inline-start: 0.375rem;
-    border: 1px solid GrayText;
-    border-radius: 50%;
-    font-size: 0.75rem;
-    cursor: help;
-}
-.tooltip {
-    visibility: hidden;
-    position: absolute;
-    inset-inline-start: 0;
-    bottom: 100%;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid GrayText;
-    border-radius: 0.375rem;
-    background: Canvas;
-    color: CanvasText;
-    font-size: 0.875rem;
-    font-weight: 400;
-    text-wrap: pretty;
-    z-index: 1;
-}
-.jitter-tooltip {
-    width: min(20rem, 100%);
-}
-.jitter-help:hover .jitter-tooltip,
-.jitter summary:focus .jitter-tooltip {
-    visibility: visible;
-}
-.qr {
-    display: block;
-    width: 256px;
-    max-width: 100%;
-}
 .emoji-add,
 .photo-add {
     display: grid;
@@ -569,15 +526,9 @@ input[aria-invalid="true"] {
 }
 .emoji-skeleton,
 .photo-skeleton,
-.qr-skeleton,
 .appearance-skeleton {
     display: block;
     background: color-mix(in srgb, CanvasText 12%, Canvas);
-}
-.qr-skeleton {
-    width: min(256px, 100%);
-    aspect-ratio: 1;
-    border-radius: 0.5rem;
 }
 .emoji-skeleton {
     background: var(--ui-muted-hover);
@@ -590,7 +541,6 @@ input[aria-invalid="true"] {
 @media (prefers-reduced-motion: no-preference) {
     .emoji-skeleton,
     .photo-skeleton,
-    .qr-skeleton,
     .appearance-skeleton {
         animation: emoji-pulse 1.2s ease-in-out infinite;
     }
@@ -1067,13 +1017,6 @@ input[type="number"] {
     border-radius: 50%;
     outline: 2px solid white;
     outline-offset: -2px;
-}
-.crop-actions {
-    justify-content: end;
-    margin-block-start: 1rem;
-}
-.crop-actions button:first-child:nth-last-child(3) {
-    margin-inline-end: auto;
 }
 
 .appearance-skeleton {

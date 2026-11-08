@@ -1,8 +1,8 @@
-import { createAutosave } from "./autosave";
-import { AppearanceEditor, unchangedAppearance } from "./Appearance";
-import type { Appearance, State } from "./api";
+import { createPhotoAppearance } from "./photo-appearance";
+import { AppearanceEditor } from "./Appearance";
+import type { State } from "./api";
 import { photoDisplayName } from "./display-names";
-import { createSignal, onCleanup, Show, untrack } from "solid-js";
+import { createSignal, Show, untrack } from "solid-js";
 import type { AccountApi, Photo } from "./api";
 import { CropEditor } from "./CropEditor";
 import { centeredCrop } from "./crop";
@@ -30,17 +30,16 @@ export function PhotoDialog(props: {
         const target = props.premium ? chooseButton : closeButton;
         queueMicrotask(() => target.focus());
     }
-    const initialAppearance = untrack(() => props.photo.appearance ?? unchangedAppearance());
     const { api, photoId, refresh } = untrack(() => ({
         api: props.api,
         photoId: props.photo.id,
         refresh: props.refresh,
     }));
-    const appearance = createAutosave<Appearance>(
+    const appearance = createPhotoAppearance(
+        () => props.photo.appearance,
         (value) => api.request(`photos/${encodeURIComponent(photoId)}/appearance`, "PUT", value),
         refresh,
     );
-    onCleanup(appearance.dispose);
     const [editing, setEditing] = createSignal(false);
     const [saving, setSaving] = createSignal(false);
     const [choosing, setChoosing] = createSignal(untrack(() => !!props.chooseEmoji));
@@ -248,7 +247,7 @@ export function PhotoDialog(props: {
                         profile={props.profile}
                         api={props.api}
                         avatarUrl={props.api.selectedPhotoUrl(props.photo)}
-                        value={appearance.draft() ?? initialAppearance}
+                        value={appearance.value()}
                         change={appearance.edit}
                         disabled={saving()}
                     />
