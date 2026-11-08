@@ -21,7 +21,12 @@ Check out [Demo](https://celine.cum.army)
 
 ## Get started
 
-Download and run the binary for your platform from [Releases](../../releases).
+Download and run the binary for your platform:
+
+- [macOS ARM64](https://github.com/sleroq/celine/releases/latest/download/celine-aarch64-apple-darwin)
+- [Windows x64](https://github.com/sleroq/celine/releases/latest/download/celine-x86_64-pc-windows-msvc.exe)
+
+Other platforms are available on [Releases](../../releases).
 
 ## Run with Nix
 
