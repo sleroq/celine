@@ -285,7 +285,7 @@ function AccountWorkspace(
             (photo) => photo.appearance.profile !== null || photo.appearance.name !== null,
         );
     const premium = () => (props.state.profile?.premium ?? props.state.auth.premium) === true;
-    const tab = () => selectedTab();
+    const tab = () => (premium() ? selectedTab() : "photos");
     const photoOrder = createAutosave<string[]>(
         (ids) =>
             props.api.request("photos/order", "POST", {
@@ -367,26 +367,56 @@ function AccountWorkspace(
                             label="nextPhoto"
                         />
                     </TabsTrigger>
-                    <TabsTrigger value="emojis" aria-controls="emojis-panel">
-                        {t("emojiStatus")}
-                        <RotationProgress
-                            settings={props.state.emoji_settings}
-                            applied={props.state.applied_emoji_settings}
-                            next={props.state.next_emoji_rotation_at}
-                            now={props.now}
-                            label="nextEmoji"
-                        />
-                    </TabsTrigger>
-                    <TabsTrigger value="appearance" aria-controls="appearance-panel">
-                        {t("appearance")}
-                        <RotationProgress
-                            settings={props.state.appearance_settings}
-                            applied={props.state.applied_appearance_settings}
-                            next={props.state.next_appearance_rotation_at}
-                            now={props.now}
-                            label="nextAppearance"
-                        />
-                    </TabsTrigger>
+                    <Tooltip>
+                        <TooltipTrigger
+                            as="span"
+                            class="inline-flex flex-1"
+                            tabindex={premium() ? undefined : 0}
+                        >
+                            <TabsTrigger
+                                value="emojis"
+                                aria-controls="emojis-panel"
+                                disabled={!premium()}
+                            >
+                                {t("emojiStatus")}
+                                <RotationProgress
+                                    settings={props.state.emoji_settings}
+                                    applied={props.state.applied_emoji_settings}
+                                    next={props.state.next_emoji_rotation_at}
+                                    now={props.now}
+                                    label="nextEmoji"
+                                />
+                            </TabsTrigger>
+                        </TooltipTrigger>
+                        <Show when={!premium()}>
+                            <TooltipContent>{t("premiumRequired")}</TooltipContent>
+                        </Show>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger
+                            as="span"
+                            class="inline-flex flex-1"
+                            tabindex={premium() ? undefined : 0}
+                        >
+                            <TabsTrigger
+                                value="appearance"
+                                aria-controls="appearance-panel"
+                                disabled={!premium()}
+                            >
+                                {t("appearance")}
+                                <RotationProgress
+                                    settings={props.state.appearance_settings}
+                                    applied={props.state.applied_appearance_settings}
+                                    next={props.state.next_appearance_rotation_at}
+                                    now={props.now}
+                                    label="nextAppearance"
+                                />
+                            </TabsTrigger>
+                        </TooltipTrigger>
+                        <Show when={!premium()}>
+                            <TooltipContent>{t("premiumRequired")}</TooltipContent>
+                        </Show>
+                    </Tooltip>
                     <TabsIndicator />
                 </TabsList>
                 <div class="relative">
