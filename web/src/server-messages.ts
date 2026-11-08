@@ -1,6 +1,10 @@
 const en = {
+    "validation.appearance_selection_required":
+        "Select at least one appearance preset before starting rotation.",
     "validation.photo_emoji_rotation_conflict":
         "Independent emoji rotation is unavailable while photos have assigned statuses.",
+    "validation.photo_appearance_rotation_conflict":
+        "Independent appearance rotation is unavailable while photos have assigned appearances.",
     "account.not_found": "Account not found.",
     "account.pending_signin": "Finish signing in to the new account before adding another.",
     "auth.authorization_expired": "Telegram authorization expired or was revoked. Log in again.",
@@ -104,8 +108,12 @@ const en = {
 } as const;
 
 const ru = {
+    "validation.appearance_selection_required":
+        "Выберите хотя бы один набор оформления перед запуском смены.",
     "validation.photo_emoji_rotation_conflict":
         "Отдельная ротация эмодзи недоступна, пока фотографиям назначены статусы.",
+    "validation.photo_appearance_rotation_conflict":
+        "Отдельная смена оформления недоступна, пока фотографиям назначено оформление.",
     "account.not_found": "Аккаунт не найден.",
     "account.pending_signin": "Войдите в новый аккаунт, прежде чем добавлять следующий.",
     "auth.authorization_expired": "Авторизация Telegram истекла или отозвана. Войдите снова.",
@@ -215,8 +223,12 @@ const ru = {
 } satisfies Record<keyof typeof en, string>;
 
 const uk = {
+    "validation.appearance_selection_required":
+        "Виберіть хоча б один набір оформлення перед запуском зміни.",
     "validation.photo_emoji_rotation_conflict":
         "Окрема ротація емодзі недоступна, поки фотографіям призначено статуси.",
+    "validation.photo_appearance_rotation_conflict":
+        "Окрема зміна оформлення недоступна, поки фотографіям призначено оформлення.",
     "account.not_found": "Обліковий запис не знайдено.",
     "account.pending_signin": "Увійдіть у новий обліковий запис, перш ніж додавати наступний.",
     "auth.authorization_expired":

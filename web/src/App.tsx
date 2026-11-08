@@ -1,3 +1,4 @@
+import { AppearancePanel } from "./Appearance";
 import { photoDisplayName } from "./display-names";
 import { createEffect, createSignal, For, onCleanup, onSettled, Show, untrack } from "solid-js";
 import { accountApi, reconcilePhotoOrder, RequestError, request, timeRemaining } from "./api";
@@ -42,7 +43,13 @@ import {
 type AccountActions = Actions & { api: AccountApi };
 type Notify = (message: string, action?: () => void) => void;
 type SaveStatusValue = "idle" | "pending" | "saved" | "error";
-type SaveKey = "photos" | "emojis" | "photoSettings" | "emojiSettings";
+type SaveKey =
+    | "photos"
+    | "emojis"
+    | "photoSettings"
+    | "emojiSettings"
+    | "appearanceSettings"
+    | "appearancePresets";
 type ReportSave = (
     key: SaveKey,
     status: SaveStatusValue,
@@ -55,6 +62,8 @@ function saveLabel(key: SaveKey) {
         emojis: "emojiStatus",
         photoSettings: "photoRotation",
         emojiSettings: "emojiRotation",
+        appearanceSettings: "appearanceRotation",
+        appearancePresets: "appearancePresets",
     } as const;
     return t(labels[key]);
 }
@@ -69,11 +78,15 @@ export default function App() {
     const [saves, setSaves] = createSignal<
         Partial<Record<SaveKey, { status: SaveStatusValue; valid: boolean; retry: () => void }>>
     >({});
-    const unsaved = () =>
-        Object.values(saves()).some((save) => save.status === "pending" || save.status === "error");
     const saving = () => Object.values(saves()).some((save) => save.status === "pending");
     const failed = () => {
-        const keys: SaveKey[] = ["photos", "emojis", "photoSettings", "emojiSettings"];
+        const keys: SaveKey[] = [
+            "photos",
+            "emojis",
+            "photoSettings",
+            "emojiSettings",
+            "appearanceSettings",
+        ];
         return keys.flatMap((key) => {
             const save = saves()[key];
             return save?.status === "error" && save.valid ? [{ key, save }] : [];
@@ -116,8 +129,6 @@ export default function App() {
     function load() {
         pending ??= request("state")
             .then((data) => {
-                if (state() && data.active_account_id !== state()?.active_account_id && unsaved())
-                    return;
                 if (data.active_account_id !== state()?.active_account_id) {
                     setNotice("");
                 }
@@ -210,8 +221,7 @@ export default function App() {
                             accounts={data().accounts}
                             activeId={data().active_account_id}
                             now={now()}
-                            busy={!!operation() || unsaved()}
-                            unsaved={unsaved()}
+                            busy={!!operation()}
                             perform={perform}
                         />
                     )}
@@ -268,10 +278,14 @@ function AccountWorkspace(
         reportSave: ReportSave;
     },
 ) {
-    const [selectedTab, setTab] = createSignal<"photos" | "emojis">("photos");
+    const [selectedTab, setTab] = createSignal<"photos" | "emojis" | "appearance">("photos");
     const photoStatuses = () => props.state.photos.some((photo) => !!photo.emoji_status);
+    const photoAppearances = () =>
+        props.state.photos.some(
+            (photo) => photo.appearance.profile !== null || photo.appearance.name !== null,
+        );
     const premium = () => (props.state.profile?.premium ?? props.state.auth.premium) === true;
-    const tab = () => (premium() ? selectedTab() : "photos");
+    const tab = () => selectedTab();
     const photoOrder = createAutosave<string[]>(
         (ids) =>
             props.api.request("photos/order", "POST", {
@@ -332,18 +346,115 @@ function AccountWorkspace(
             <Tabs
                 class="mt-6"
                 value={tab()}
-                onChange={(value) => setTab(value === "emojis" ? "emojis" : "photos")}
+                onChange={(value) =>
+                    setTab(
+                        value === "appearance"
+                            ? "appearance"
+                            : value === "emojis"
+                              ? "emojis"
+                              : "photos",
+                    )
+                }
             >
                 <TabsList aria-label={t("rotationSettings")}>
                     <TabsTrigger value="photos" aria-controls="photos-panel">
                         {t("profilePhotos")}
+                        <RotationProgress
+                            settings={props.state.settings}
+                            applied={props.state.applied_settings}
+                            next={props.state.next_rotation_at}
+                            now={props.now}
+                            label="nextPhoto"
+                        />
                     </TabsTrigger>
                     <TabsTrigger value="emojis" aria-controls="emojis-panel">
                         {t("emojiStatus")}
+                        <RotationProgress
+                            settings={props.state.emoji_settings}
+                            applied={props.state.applied_emoji_settings}
+                            next={props.state.next_emoji_rotation_at}
+                            now={props.now}
+                            label="nextEmoji"
+                        />
+                    </TabsTrigger>
+                    <TabsTrigger value="appearance" aria-controls="appearance-panel">
+                        {t("appearance")}
+                        <RotationProgress
+                            settings={props.state.appearance_settings}
+                            applied={props.state.applied_appearance_settings}
+                            next={props.state.next_appearance_rotation_at}
+                            now={props.now}
+                            label="nextAppearance"
+                        />
                     </TabsTrigger>
                     <TabsIndicator />
                 </TabsList>
                 <div class="relative">
+                    <TabsContent
+                        value="appearance"
+                        id="appearance-panel"
+                        forceMount
+                        inert={tab() !== "appearance"}
+                        aria-hidden={tab() !== "appearance" ? "true" : undefined}
+                        class={tab() === "appearance" ? "relative" : "hidden"}
+                    >
+                        <Show when={photoAppearances()}>
+                            <div class="mt-4 space-y-3">
+                                <p class="text-sm text-muted-foreground" role="status">
+                                    {t("photoAppearanceConflict")}
+                                </p>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    disabled={props.busy}
+                                    onClick={() => {
+                                        const ids = props.state.photos
+                                            .filter(
+                                                (photo) =>
+                                                    photo.appearance.profile !== null ||
+                                                    photo.appearance.name !== null,
+                                            )
+                                            .map((photo) => photo.id);
+                                        const api = props.api;
+                                        void props.perform(() => api.clearPhotoAppearances(ids));
+                                    }}
+                                >
+                                    {t("clearAllPhotoAppearances")}
+                                </Button>
+                            </div>
+                        </Show>
+                        <fieldset
+                            disabled={photoAppearances()}
+                            class="m-0 min-w-0 border-0 p-0 disabled:opacity-60"
+                        >
+                            <AppearancePanel
+                                api={props.api}
+                                state={props.state}
+                                premium={premium()}
+                                busy={props.busy}
+                                refresh={props.refresh}
+                                reportSave={(status, retry) =>
+                                    props.reportSave("appearancePresets", status, true, retry)
+                                }
+                            >
+                                {(dirty) => (
+                                    <Rotation
+                                        api={props.api}
+                                        target="appearance"
+                                        actionBlocked={dirty()}
+                                        settings={props.state.appearance_settings}
+                                        count={props.state.appearance_presets.length}
+                                        busy={props.busy || !premium() || photoAppearances()}
+                                        locked={props.busy || !premium() || photoAppearances()}
+                                        perform={props.perform}
+                                        refresh={props.refresh}
+                                        applied={props.state.applied_appearance_settings}
+                                        reportSave={props.reportSave}
+                                    />
+                                )}
+                            </AppearancePanel>
+                        </fieldset>
+                    </TabsContent>
                     <TabsContent
                         value="photos"
                         id="photos-panel"
@@ -358,6 +469,7 @@ function AccountWorkspace(
                         ]}
                     >
                         <Photos
+                            profile={props.state.profile}
                             premium={premium()}
                             api={props.api}
                             notify={props.notify}
@@ -376,8 +488,6 @@ function AccountWorkspace(
                             target="photo"
                             settings={props.state.settings}
                             count={props.state.photos.length}
-                            next={props.state.next_rotation_at}
-                            now={props.now}
                             busy={props.busy && !props.reordering}
                             locked={props.busy}
                             perform={props.perform}
@@ -443,8 +553,6 @@ function AccountWorkspace(
                                     count={
                                         (emojis.draft() ?? props.state.selected_emoji_ids).length
                                     }
-                                    next={props.state.next_emoji_rotation_at}
-                                    now={props.now}
                                     busy={(props.busy && !props.reordering) || photoStatuses()}
                                     locked={props.busy || photoStatuses()}
                                     perform={props.perform}
@@ -467,6 +575,7 @@ function Photos(
         premium: boolean;
         notify: Notify;
         photos: State["photos"];
+        profile: State["profile"];
         photoCache: State["photo_cache"];
         currentPhotoId: string | null;
         refresh: () => Promise<void>;
@@ -667,6 +776,7 @@ function Photos(
                     <Show when={props.photos.find((photo) => photo.id === selection.id)}>
                         {(photo) => (
                             <PhotoDialog
+                                profile={props.profile}
                                 chooseEmoji={selection.chooseEmoji}
                                 premium={props.premium}
                                 api={props.api}
@@ -889,14 +999,75 @@ function DurationField(props: {
     );
 }
 
+function RotationProgress(props: {
+    settings: Settings;
+    applied: Settings | null;
+    next: number | null;
+    now: number;
+    label: "nextPhoto" | "nextEmoji" | "nextAppearance";
+}) {
+    const status = () =>
+        !props.settings.enabled
+            ? t("stopped")
+            : props.next != null
+              ? t(props.label, { time: timeRemaining(props.next, props.now) })
+              : t("running");
+    const progress = () =>
+        props.next == null || !props.applied
+            ? 0
+            : Math.max(0, Math.min(1, 1 - (props.next - props.now) / props.applied.interval_secs));
+
+    return (
+        <Tooltip>
+            <TooltipTrigger as="span" class="inline-flex" aria-hidden="true">
+                <svg viewBox="0 0 20 20" class="size-5" fill="none">
+                    <circle
+                        cx="10"
+                        cy="10"
+                        r="8"
+                        stroke="currentColor"
+                        stroke-opacity="0.25"
+                        stroke-width="2"
+                    />
+                    <Show
+                        when={props.settings.enabled}
+                        fallback={
+                            <path
+                                d="M8 7v6M12 7v6"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                            />
+                        }
+                    >
+                        <circle
+                            cx="10"
+                            cy="10"
+                            r="8"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            pathLength="1"
+                            stroke-dasharray={`${progress()} 1`}
+                            transform="rotate(-90 10 10)"
+                        />
+                        <circle cx="10" cy="10" r="2" fill="currentColor" />
+                    </Show>
+                </svg>
+            </TooltipTrigger>
+            <TooltipContent>{status()}</TooltipContent>
+            <span class="visually-hidden">{status()}</span>
+        </Tooltip>
+    );
+}
+
 function Rotation(
     props: AccountActions & {
-        target: "photo" | "emoji";
+        target: "photo" | "emoji" | "appearance";
+        actionBlocked?: boolean;
         settings: Settings;
         applied: Settings | null;
         count: number;
-        next: number | null;
-        now: number;
         locked: boolean;
         refresh: () => Promise<void>;
         beforeAction?: () => Promise<void>;
@@ -904,7 +1075,12 @@ function Rotation(
     },
 ) {
     let jitterDetails!: HTMLDetailsElement;
-    const endpoint = () => (props.target === "photo" ? "settings" : "emojis/settings");
+    const endpoint = () =>
+        props.target === "photo"
+            ? "settings"
+            : props.target === "appearance"
+              ? "appearance/settings"
+              : "emojis/settings";
     const fieldId = (field: string) => `${props.target}-${field}`;
     const jitterModes = [
         { value: "auto", label: t("automaticJitter") },
@@ -916,7 +1092,12 @@ function Rotation(
         () => props.refresh(),
     );
     onCleanup(autosave.dispose);
-    const saveKey = () => (props.target === "photo" ? "photoSettings" : "emojiSettings");
+    const saveKey = () =>
+        props.target === "photo"
+            ? "photoSettings"
+            : props.target === "appearance"
+              ? "appearanceSettings"
+              : "emojiSettings";
     const settings = () => autosave.draft() ?? props.settings;
     const intervalInvalid = () =>
         !Number.isFinite(settings().interval_secs) || settings().interval_secs < 1;
@@ -962,6 +1143,7 @@ function Rotation(
     }
 
     function action(name: "apply" | "start" | "stop") {
+        if (name !== "stop" && props.actionBlocked) return;
         // oxlint-disable-next-line solid/reactivity -- perform invokes this callback when the action runs; it is not a reactive computation.
         void props.perform(async () => {
             if (name !== "stop") {
@@ -973,10 +1155,18 @@ function Rotation(
     }
 
     return (
-        <section aria-label={props.target === "photo" ? t("photoRotation") : t("emojiRotation")}>
+        <section
+            aria-label={
+                props.target === "photo"
+                    ? t("photoRotation")
+                    : props.target === "appearance"
+                      ? t("appearanceRotation")
+                      : t("emojiRotation")
+            }
+        >
             <Card class="gap-0 rounded-2xl p-4 sm:p-5">
                 <form
-                    class="mt-0! mb-5! grid gap-4!"
+                    class="m-0! grid gap-4!"
                     onSubmit={(event) => {
                         event.preventDefault();
                     }}
@@ -1110,7 +1300,12 @@ function Rotation(
                             when={props.settings.enabled}
                             fallback={
                                 <Button
-                                    disabled={props.locked || props.count === 0 || !valid()}
+                                    disabled={
+                                        props.locked ||
+                                        props.actionBlocked ||
+                                        props.count === 0 ||
+                                        !valid()
+                                    }
                                     onClick={() => action("start")}
                                 >
                                     {t("startRotation")}
@@ -1120,6 +1315,7 @@ function Rotation(
                             <Button
                                 disabled={
                                     props.locked ||
+                                    props.actionBlocked ||
                                     !valid() ||
                                     !props.applied ||
                                     configEqual(settings(), props.applied)
@@ -1138,15 +1334,6 @@ function Rotation(
                         </Show>
                     </div>
                 </form>
-                <p class="m-0 text-sm text-muted-foreground tabular-nums" role="status">
-                    {props.settings.enabled
-                        ? props.next
-                            ? t(props.target === "photo" ? "nextPhoto" : "nextEmoji", {
-                                  time: timeRemaining(props.next, props.now),
-                              })
-                            : t("running")
-                        : t("stopped")}
-                </p>
             </Card>
         </section>
     );

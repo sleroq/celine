@@ -4,7 +4,7 @@
 use crate::messages::MessageInfo;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     path::Path,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -44,6 +44,8 @@ pub enum EmojiSource {
     Collectible,
 }
 
+pub const DEFAULT_EMOJI_ID: &str = "celine:no-status";
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EmojiChoice {
     // Strings preserve Telegram's 64-bit IDs in JavaScript.
@@ -57,6 +59,20 @@ pub struct EmojiChoice {
     pub thumbnail_url: Option<String>,
     #[serde(default)]
     pub text_color: bool,
+}
+
+impl EmojiChoice {
+    pub fn no_status() -> Self {
+        Self {
+            id: DEFAULT_EMOJI_ID.into(),
+            document_id: None,
+            label: "⊘".into(),
+            source: "Default".into(),
+            source_kind: None,
+            thumbnail_url: None,
+            text_color: false,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,6 +119,8 @@ pub struct Profile {
     pub premium: bool,
     pub photo_url: Option<String>,
     pub emoji: Option<ProfileEmoji>,
+    pub appearance: crate::library::Appearance,
+    pub appearance_collectible_conflict: bool,
     pub updated_at: u64,
 }
 
@@ -370,6 +388,7 @@ pub struct Telegram {
     sets: HashMap<i64, tl::types::StickerSet>,
     thumbnails: HashMap<i64, Thumbnail>,
     documents: HashMap<i64, tl::types::Document>,
+    background_emojis: HashSet<i64>,
     profile: Option<Profile>,
     profile_photo: Option<DownloadFile>,
     profile_refresh_due: bool,
@@ -402,6 +421,7 @@ impl Telegram {
             sets: HashMap::new(),
             thumbnails: HashMap::new(),
             documents: HashMap::new(),
+            background_emojis: HashSet::new(),
             profile: None,
             profile_photo: None,
             profile_refresh_due: false,
@@ -721,6 +741,131 @@ impl Telegram {
         Ok((bytes, content_type))
     }
 
+    pub async fn apply_appearance(
+        &mut self,
+        appearance: &crate::library::Appearance,
+    ) -> Result<(), TelegramError> {
+        self.require_available()?;
+        self.require_authorized()?;
+        self.verify_identity().await?;
+        if !appearance.is_empty() && !self.profile.as_ref().is_some_and(|profile| profile.premium) {
+            return Err(TelegramError::message(
+                "telegram.premium_required",
+                "Telegram Premium is required for appearance changes.",
+            ));
+        }
+        self.validate_appearance(appearance).await?;
+        for (for_profile, value) in [(true, &appearance.profile), (false, &appearance.name)] {
+            let Some(value) = value else {
+                continue;
+            };
+            let background_emoji_id = appearance_emoji_id(value)?;
+            let color = if value.color.is_none() && background_emoji_id.is_none() {
+                None
+            } else {
+                Some(tl::enums::PeerColor::Color(tl::types::PeerColor {
+                    color: value.color,
+                    background_emoji_id,
+                }))
+            };
+            let updated = self
+                .connection
+                .client()
+                .invoke(&tl::functions::account::UpdateColor { for_profile, color })
+                .await
+                .map_err(|error| self.handle_error(error))?;
+            if !updated {
+                return Err(TelegramError::message(
+                    "telegram.appearance_update_failed",
+                    "Telegram did not update appearance.",
+                ));
+            }
+            self.refresh_after_mutation().await;
+        }
+        Ok(())
+    }
+    pub async fn validate_appearance(
+        &mut self,
+        appearance: &crate::library::Appearance,
+    ) -> Result<(), TelegramError> {
+        let ids = [&appearance.profile, &appearance.name]
+            .into_iter()
+            .flatten()
+            .map(appearance_emoji_id)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if ids.iter().any(|id| !self.background_emojis.contains(id)) {
+            self.appearance_catalog().await?;
+            if ids.iter().any(|id| !self.background_emojis.contains(id)) {
+                let sets = self
+                    .sets
+                    .values()
+                    .filter(|set| set.text_color)
+                    .map(|set| set.id)
+                    .collect::<Vec<_>>();
+                for id in sets {
+                    self.emoji_set(id).await?;
+                }
+            }
+        }
+        if ids.iter().any(|id| !self.background_emojis.contains(id)) {
+            return Err(TelegramError::message(
+                "validation.appearance_emoji",
+                "Choose an emoji from the background catalog or an eligible installed pack.",
+            ));
+        }
+        Ok(())
+    }
+    pub async fn appearance_catalog(&mut self) -> Result<serde_json::Value, TelegramError> {
+        self.require_available()?;
+        self.require_authorized()?;
+        let profile = self
+            .connection
+            .client()
+            .invoke(&tl::functions::help::GetPeerProfileColors { hash: 0 })
+            .await
+            .map_err(|error| self.handle_error(error))?;
+        let name = self
+            .connection
+            .client()
+            .invoke(&tl::functions::help::GetPeerColors { hash: 0 })
+            .await
+            .map_err(|error| self.handle_error(error))?;
+        let defaults = self
+            .connection
+            .client()
+            .invoke(&tl::functions::account::GetDefaultBackgroundEmojis { hash: 0 })
+            .await
+            .map_err(|error| self.handle_error(error))?;
+        let mut choices = Vec::new();
+        let ids = match defaults {
+            tl::enums::EmojiList::List(list) => list.document_id,
+            tl::enums::EmojiList::NotModified => Vec::new(),
+        };
+        self.background_emojis.extend(ids.iter().copied());
+        for chunk in ids.chunks(100) {
+            let documents = self
+                .connection
+                .client()
+                .invoke(&tl::functions::messages::GetCustomEmojiDocuments {
+                    document_id: chunk.to_vec(),
+                })
+                .await
+                .map_err(|error| self.handle_error(error))?;
+            for document in documents {
+                if let tl::enums::Document::Document(document) = document {
+                    let choice = self.emoji_choice(document, "Background");
+                    choices.push(choice);
+                }
+            }
+        }
+        Ok(
+            serde_json::json!({ "profile_colors": appearance_colors(profile), "name_colors": appearance_colors(name), "choices": choices, "sets": self.emoji_sets().await?.into_iter().filter(|set| set.text_color).collect::<Vec<_>>() }),
+        )
+    }
+
     pub async fn set_emoji_status(&mut self, id: Option<&str>) -> Result<(), TelegramError> {
         self.require_available()?;
         self.require_authorized()?;
@@ -978,7 +1123,12 @@ impl Telegram {
             )
         })?;
         let title = set.title.clone();
+        let eligible = set.text_color;
         let documents = self.emoji_set_documents(id).await?;
+        if eligible {
+            self.background_emojis
+                .extend(documents.iter().map(|document| document.id));
+        }
         Ok(documents
             .into_iter()
             .map(|document| self.emoji_choice(document, &title))
@@ -1171,6 +1321,11 @@ impl Telegram {
             premium: user.premium,
             photo_url: profile_photo_url(user.photo.as_ref()),
             emoji: None,
+            appearance_collectible_conflict: matches!(
+                user.emoji_status,
+                Some(tl::enums::EmojiStatus::Collectible(_))
+            ),
+            appearance: current_appearance(user.profile_color.as_ref(), user.color.as_ref()),
             updated_at: unix_now(),
         });
         if let Some((id, expires_at)) = current_status(user.emoji_status.as_ref(), unix_now()) {
@@ -1595,8 +1750,269 @@ fn thumbnail_content_type(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
+fn appearance_colors(colors: tl::enums::help::PeerColors) -> Vec<serde_json::Value> {
+    fn swatches(set: Option<tl::enums::help::PeerColorSet>) -> (Vec<i32>, Vec<i32>) {
+        match set {
+            Some(tl::enums::help::PeerColorSet::Set(set)) => (set.colors, Vec::new()),
+            Some(tl::enums::help::PeerColorSet::PeerColorProfileSet(set)) => (set.palette_colors, set.bg_colors),
+            None => (Vec::new(), Vec::new()),
+        }
+    }
+    // Telegram's documented IDs 0..6 omit RGB values. Use the Android client's
+    // ThemeColors.java defaults and darkblue.attheme name-in-message colors.
+    const LIGHT: [i32; 7] = [
+        0xcc5049, 0xd67722, 0x955cdb, 0x40a920, 0x309eba, 0x368ad1, 0xc7508b,
+    ];
+    const DARK: [i32; 7] = [
+        0xe88878, 0xe8ab5a, 0x8c8dea, 0x7dd071, 0x53ccc6, 0x5cadea, 0xe8749a,
+    ];
+    match colors {
+        tl::enums::help::PeerColors::Colors(colors) => colors.colors.into_iter().filter_map(|color| {
+            let tl::enums::help::PeerColorOption::Option(color) = color;
+            if color.hidden { return None; }
+            let (mut light, bg) = swatches(color.colors);
+            let (mut dark, mut dark_bg) = swatches(color.dark_colors);
+            if dark_bg.is_empty() { dark_bg = bg.clone(); }
+            if let Ok(index @ 0..=6) = usize::try_from(color.color_id) {
+                if light.is_empty() { light.push(LIGHT[index]); }
+                if dark.is_empty() { dark.push(DARK[index]); }
+            }
+            if dark.is_empty() { dark = light.clone(); }
+            let mut result = serde_json::json!({ "id": color.color_id, "colors": light, "dark_colors": dark });
+            if !bg.is_empty() || !dark_bg.is_empty() {
+                result["bg_colors"] = serde_json::json!(bg);
+                result["dark_bg_colors"] = serde_json::json!(dark_bg);
+            }
+            Some(result)
+        }).collect(),
+        tl::enums::help::PeerColors::NotModified => Vec::new(),
+    }
+}
+
+fn appearance_emoji_id(
+    value: &crate::library::AppearanceValue,
+) -> Result<Option<i64>, TelegramError> {
+    value
+        .emoji
+        .as_ref()
+        .map(|emoji| {
+            if matches!(emoji.source_kind, Some(EmojiSource::Collectible)) {
+                return Err(TelegramError::message(
+                    "validation.appearance_emoji",
+                    "Collectibles are not background emoji.",
+                ));
+            }
+            emoji
+                .document_id
+                .as_deref()
+                .unwrap_or(&emoji.id)
+                .parse::<i64>()
+                .map_err(|_| {
+                    TelegramError::message(
+                        "validation.appearance_emoji",
+                        "Invalid background emoji ID.",
+                    )
+                })
+        })
+        .transpose()
+}
+
+fn current_appearance(
+    profile: Option<&tl::enums::PeerColor>,
+    name: Option<&tl::enums::PeerColor>,
+) -> crate::library::Appearance {
+    fn value(color: Option<&tl::enums::PeerColor>) -> Option<crate::library::AppearanceValue> {
+        match color {
+            Some(tl::enums::PeerColor::Color(color)) => Some(crate::library::AppearanceValue {
+                color: color.color,
+                emoji: color.background_emoji_id.map(|id| EmojiChoice {
+                    id: id.to_string(),
+                    document_id: None,
+                    label: "Background".into(),
+                    source: "Current".into(),
+                    source_kind: None,
+                    thumbnail_url: Some(format!("/api/emojis/{id}/thumbnail")),
+                    text_color: true,
+                }),
+            }),
+            None => Some(crate::library::AppearanceValue::default()),
+            _ => None,
+        }
+    }
+    crate::library::Appearance {
+        profile: value(profile),
+        name: value(name),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn appearance_validation_uses_provenance_and_prepares_both_sections() {
+        let (_dir, mut telegram) = offline_telegram().await;
+        let mut choice = telegram.emoji_choice(emoji_document(123, "image/webp"), "Background");
+        choice.text_color = false;
+        telegram.background_emojis.insert(123);
+        let mut appearance = crate::library::Appearance {
+            profile: Some(crate::library::AppearanceValue {
+                color: None,
+                emoji: Some(choice.clone()),
+            }),
+            name: None,
+        };
+        telegram.validate_appearance(&appearance).await.unwrap();
+        choice.id = "not-an-id".into();
+        appearance.name = Some(crate::library::AppearanceValue {
+            color: None,
+            emoji: Some(choice),
+        });
+        assert_eq!(
+            telegram
+                .validate_appearance(&appearance)
+                .await
+                .unwrap_err()
+                .info
+                .code,
+            "validation.appearance_emoji"
+        );
+    }
+    #[test]
+    fn background_eligibility_does_not_depend_on_document_text_color() {
+        use super::*;
+        let value = crate::library::AppearanceValue {
+            color: None,
+            emoji: Some(EmojiChoice {
+                id: "123".into(),
+                document_id: None,
+                label: "Default".into(),
+                source: "Background".into(),
+                source_kind: None,
+                thumbnail_url: None,
+                text_color: false,
+            }),
+        };
+        assert_eq!(appearance_emoji_id(&value).unwrap(), Some(123));
+        let mut value = value;
+        value.emoji.as_mut().unwrap().id = "invalid".into();
+        assert!(appearance_emoji_id(&value).is_err());
+    }
+    #[test]
+    fn fallback_palette_and_dark_fallback_preserve_server_colors() {
+        use super::*;
+        let colors = (0..=7)
+            .map(|id| {
+                tl::enums::help::PeerColorOption::Option(tl::types::help::PeerColorOption {
+                    hidden: false,
+                    color_id: id,
+                    colors: (id == 7).then(|| {
+                        tl::enums::help::PeerColorSet::Set(tl::types::help::PeerColorSet {
+                            colors: vec![0x123456],
+                        })
+                    }),
+                    dark_colors: None,
+                    channel_min_level: None,
+                    group_min_level: None,
+                })
+            })
+            .collect();
+        let colors = appearance_colors(tl::enums::help::PeerColors::Colors(
+            tl::types::help::PeerColors { hash: 1, colors },
+        ));
+        let light = [
+            0xcc5049, 0xd67722, 0x955cdb, 0x40a920, 0x309eba, 0x368ad1, 0xc7508b, 0x123456,
+        ];
+        let dark = [
+            0xe88878, 0xe8ab5a, 0x8c8dea, 0x7dd071, 0x53ccc6, 0x5cadea, 0xe8749a, 0x123456,
+        ];
+        for (index, color) in colors.iter().enumerate() {
+            assert_eq!(color["colors"], serde_json::json!([light[index]]));
+            assert_eq!(color["dark_colors"], serde_json::json!([dark[index]]));
+        }
+    }
+    #[test]
+    fn profile_backgrounds_preserve_both_palettes_and_fall_back_to_light() {
+        use super::*;
+        let profile_set = |palette, bg| {
+            tl::enums::help::PeerColorSet::PeerColorProfileSet(
+                tl::types::help::PeerColorProfileSet {
+                    palette_colors: vec![palette],
+                    bg_colors: bg,
+                    story_colors: vec![],
+                },
+            )
+        };
+        for has_dark in [false, true] {
+            let colors = appearance_colors(tl::enums::help::PeerColors::Colors(
+                tl::types::help::PeerColors {
+                    hash: 1,
+                    colors: vec![tl::enums::help::PeerColorOption::Option(
+                        tl::types::help::PeerColorOption {
+                            hidden: false,
+                            color_id: 42,
+                            colors: Some(profile_set(0x123456, vec![0x111111, 0x222222])),
+                            dark_colors: has_dark.then(|| profile_set(0xabcdef, vec![0x333333, 0x444444])),
+                            channel_min_level: None,
+                            group_min_level: None,
+                        },
+                    )],
+                },
+            ));
+            assert_eq!(colors[0]["colors"], serde_json::json!([0x123456]));
+            assert_eq!(colors[0]["bg_colors"], serde_json::json!([0x111111, 0x222222]));
+            assert_eq!(colors[0]["dark_colors"], serde_json::json!([if has_dark { 0xabcdef } else { 0x123456 }]));
+            assert_eq!(colors[0]["dark_bg_colors"], if has_dark {
+                serde_json::json!([0x333333, 0x444444])
+            } else {
+                serde_json::json!([0x111111, 0x222222])
+            });
+        }
+    }
+    #[test]
+    fn appearance_swatches_use_telegram_palettes_and_current_fields_are_preserved() {
+        use super::*;
+        let colors = appearance_colors(tl::enums::help::PeerColors::Colors(
+            tl::types::help::PeerColors {
+                hash: 1,
+                colors: vec![tl::enums::help::PeerColorOption::Option(
+                    tl::types::help::PeerColorOption {
+                        hidden: false,
+                        color_id: 42,
+                        colors: Some(tl::enums::help::PeerColorSet::PeerColorProfileSet(
+                            tl::types::help::PeerColorProfileSet {
+                                palette_colors: vec![0x123456],
+                                bg_colors: vec![0x111111],
+                                story_colors: vec![],
+                            },
+                        )),
+                        dark_colors: Some(tl::enums::help::PeerColorSet::Set(
+                            tl::types::help::PeerColorSet {
+                                colors: vec![0xabcdef],
+                            },
+                        )),
+                        channel_min_level: None,
+                        group_min_level: None,
+                    },
+                )],
+            },
+        ));
+        assert_eq!(
+            colors[0],
+            serde_json::json!({"id":42,"colors":[0x123456],"dark_colors":[0xabcdef],"bg_colors":[0x111111],"dark_bg_colors":[0x111111]})
+        );
+        let current = current_appearance(
+            Some(&tl::enums::PeerColor::Color(tl::types::PeerColor {
+                color: Some(42),
+                background_emoji_id: Some(9223372036854775806),
+            })),
+            None,
+        );
+        assert!(current.name.as_ref().unwrap().color.is_none());
+        assert!(current.name.as_ref().unwrap().emoji.is_none());
+        let profile = current.profile.unwrap();
+        assert_eq!(profile.color, Some(42));
+        assert_eq!(profile.emoji.unwrap().id, "9223372036854775806");
+    }
+
     use super::*;
     use std::io;
 
@@ -1944,6 +2360,7 @@ mod tests {
             sets: HashMap::new(),
             thumbnails: HashMap::new(),
             documents: HashMap::new(),
+            background_emojis: HashSet::new(),
             profile: None,
             profile_photo: None,
             profile_refresh_due: false,
@@ -2178,6 +2595,8 @@ mod tests {
             premium: true,
             photo_url: None,
             emoji: None,
+            appearance_collectible_conflict: false,
+            appearance: crate::library::Appearance::default(),
             updated_at: 123,
         };
         let json = serde_json::to_value(profile).unwrap();

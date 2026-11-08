@@ -7,6 +7,21 @@ export type Settings = {
     interval_secs: number;
     jitter_secs: number | null;
 };
+export type AppearanceValue = { color: number | null; emoji: EmojiChoice | null };
+export type Appearance = { profile: AppearanceValue | null; name: AppearanceValue | null };
+export type AppearanceCatalog = {
+    profile_colors: AppearanceColor[];
+    name_colors: AppearanceColor[];
+    choices: EmojiChoice[];
+    sets?: Emojis["sets"];
+};
+export type AppearanceColor = {
+    id: number;
+    colors: number[];
+    dark_colors: number[];
+    bg_colors?: number[];
+    dark_bg_colors?: number[];
+};
 export type Crop = { x: number; y: number; size: number };
 export type Photo = {
     id: string;
@@ -16,6 +31,7 @@ export type Photo = {
     history_checked: boolean;
     crop: Crop | null;
     emoji_status: EmojiChoice | null;
+    appearance: Appearance;
 };
 export type State = {
     active_account_id: string;
@@ -37,6 +53,10 @@ export type State = {
     };
     settings: Settings;
     emoji_settings: Settings;
+    appearance_presets: Appearance[];
+    appearance_settings: Settings;
+    applied_appearance_settings: Settings | null;
+    next_appearance_rotation_at: number | null;
     applied_settings: Settings | null;
     applied_emoji_settings: Settings | null;
     profile: Profile | null;
@@ -55,6 +75,8 @@ export type AccountSummary = {
     profile: Profile | null;
 };
 export type Profile = {
+    appearance?: Appearance | null;
+    appearance_collectible_conflict?: boolean;
     name: string;
     premium: boolean;
     photo_url?: string | null;
@@ -89,6 +111,8 @@ export class RequestError extends Error {}
 type MutationMethod = "POST" | "PUT" | "DELETE";
 type RequestBody =
     | Settings
+    | Appearance
+    | { presets: Appearance[] }
     | { crop: Crop | null }
     | { password: string }
     | { ids: string[] }
@@ -135,6 +159,24 @@ export function accountApi(id: string) {
             }
             if (failures.length) throw failures[0];
         },
+        async clearPhotoAppearances(ids: string[]) {
+            const failures: unknown[] = [];
+            for (const id of ids) {
+                try {
+                    await createRequest(base)(
+                        `photos/${encodeURIComponent(id)}/appearance`,
+                        "PUT",
+                        {
+                            profile: null,
+                            name: null,
+                        },
+                    );
+                } catch (error) {
+                    failures.push(error);
+                }
+            }
+            if (failures.length) throw failures[0];
+        },
         saveCrop: (id: string, crop: Crop | null) =>
             createRequest(base)(`photos/${encodeURIComponent(id)}/crop`, "PUT", { crop }),
         emojiMediaUrl: (documentId: string) =>
@@ -148,6 +190,7 @@ function createRequest(base: string) {
     function send(path: "state"): Promise<State>;
     function send(path: "photos/history"): Promise<{ photos: { id: string }[] }>;
     function send(path: "emojis"): Promise<Emojis>;
+    function send(path: "appearance/catalog"): Promise<AppearanceCatalog>;
     function send(path: `emojis/search?${string}`): Promise<EmojiSearchResults>;
     function send(path: `emojis/sets/${string}`): Promise<Pick<Emojis, "choices">>;
     function send(path: string, method: MutationMethod, body?: RequestBody): Promise<void>;
@@ -157,6 +200,7 @@ function createRequest(base: string) {
         body?: RequestBody,
     ): Promise<
         | State
+        | AppearanceCatalog
         | Emojis
         | EmojiSearchResults
         | Pick<Emojis, "choices">

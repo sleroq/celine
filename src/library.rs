@@ -94,6 +94,8 @@ pub struct Photo {
     pub crop: Option<Crop>,
     #[serde(default)]
     pub emoji_status: Option<EmojiChoice>,
+    #[serde(default)]
+    pub appearance: Appearance,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -102,6 +104,31 @@ pub struct Crop {
     pub x: f64,
     pub y: f64,
     pub size: f64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppearanceValue {
+    pub color: Option<i32>,
+    pub emoji: Option<EmojiChoice>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Appearance {
+    pub profile: Option<AppearanceValue>,
+    pub name: Option<AppearanceValue>,
+}
+impl Appearance {
+    pub fn is_empty(&self) -> bool {
+        self.profile.is_none() && self.name.is_none()
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PendingPhotoAppearance {
+    pub photo_id: String,
+    pub appearance: Appearance,
+    pub retry_at: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,6 +142,13 @@ pub struct PendingPhotoStatus {
 #[serde(default)]
 pub struct Library {
     pub photos: Vec<Photo>,
+    pub appearance_presets: Vec<Appearance>,
+    pub appearance_settings: Settings,
+    pub applied_appearance_settings: Option<Settings>,
+    pub next_appearance_rotation_at: Option<u64>,
+    pub last_appearance_index: Option<usize>,
+    pub pending_appearance_index: Option<usize>,
+    pub pending_photo_appearance: Option<PendingPhotoAppearance>,
     pub pending_photo_status: Option<PendingPhotoStatus>,
     pub settings: Settings,
     pub selected_emojis: Vec<EmojiChoice>,
@@ -130,10 +164,75 @@ pub struct Library {
     pub photo_start_pending: bool,
 }
 impl Library {
+    pub fn next_appearance_index(&self) -> Option<usize> {
+        self.applied_appearance_settings
+            .as_ref()
+            .unwrap_or(&self.appearance_settings)
+            .mode
+            .next_index(self.appearance_presets.len(), self.last_appearance_index)
+    }
+    pub fn update_appearance_settings(&mut self, settings: Settings, now: u64) -> Result<()> {
+        settings.validate()?;
+        if settings.enabled {
+            self.check_appearance_rotation()?;
+        }
+        if settings.enabled && self.appearance_presets.is_empty() {
+            bail!(Message::new(
+                "validation.appearance_selection_required",
+                "Select at least one appearance preset."
+            ));
+        }
+        self.next_appearance_rotation_at = settings.enabled.then(|| {
+            settings
+                .next_at(now)
+                .max(self.telegram_not_before.unwrap_or(0))
+        });
+        if !settings.enabled {
+            self.pending_appearance_index = None;
+        }
+        self.applied_appearance_settings = settings.enabled.then(|| settings.clone());
+        self.appearance_settings = settings;
+        Ok(())
+    }
+
+    pub fn check_appearance_rotation(&self) -> Result<()> {
+        if self.photos.iter().any(|photo| !photo.appearance.is_empty()) {
+            bail!(Message::new(
+                "validation.photo_appearance_rotation_conflict",
+                "Remove photo appearances before starting independent appearance rotation."
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn set_photo_appearance(&mut self, id: &str, appearance: Appearance) -> Result<()> {
+        self.photos
+            .iter_mut()
+            .find(|photo| photo.id == id)
+            .context(Message::new("photo.not_found", "Photo not found."))?
+            .appearance = appearance;
+        self.stop_conflicting_appearance_rotation();
+        Ok(())
+    }
+
+    fn stop_conflicting_appearance_rotation(&mut self) {
+        if self.photos.iter().any(|photo| !photo.appearance.is_empty()) {
+            self.appearance_settings.enabled = false;
+            self.applied_appearance_settings = None;
+            self.next_appearance_rotation_at = None;
+            self.pending_appearance_index = None;
+        }
+    }
+
     pub fn has_saved_emoji_document(&self, id: i64) -> bool {
         let id = id.to_string();
-        self.selected_emojis
+        self.appearance_presets
             .iter()
+            .chain(self.photos.iter().map(|photo| &photo.appearance))
+            .flat_map(|appearance| [&appearance.profile, &appearance.name])
+            .flatten()
+            .filter_map(|value| value.emoji.as_ref())
+            .chain(self.selected_emojis.iter())
             .chain(
                 self.photos
                     .iter()
@@ -254,9 +353,16 @@ impl Library {
         if let Some(pending) = &mut self.pending_photo_status {
             pending.retry_at = pending.retry_at.max(until);
         }
-        for due in [&mut self.next_rotation_at, &mut self.next_emoji_rotation_at]
-            .into_iter()
-            .flatten()
+        if let Some(pending) = &mut self.pending_photo_appearance {
+            pending.retry_at = pending.retry_at.max(until);
+        }
+        for due in [
+            &mut self.next_rotation_at,
+            &mut self.next_emoji_rotation_at,
+            &mut self.next_appearance_rotation_at,
+        ]
+        .into_iter()
+        .flatten()
         {
             *due = (*due).max(until);
         }
@@ -354,12 +460,17 @@ impl Repository {
         }
         data.settings.validate()?;
         data.emoji_settings.validate()?;
+        data.appearance_settings.validate()?;
+        if let Some(settings) = &data.applied_appearance_settings {
+            settings.validate()?;
+        }
         if let Some(settings) = &data.applied_settings {
             settings.validate()?;
         }
         if let Some(settings) = &data.applied_emoji_settings {
             settings.validate()?;
         }
+        data.stop_conflicting_appearance_rotation();
         Ok(Self {
             data,
             dir,
@@ -561,6 +672,7 @@ impl Repository {
             history_checked,
             crop: None,
             emoji_status: None,
+            appearance: Appearance::default(),
         };
         let photos = self.dir.join("photos");
         let original_path = photos.join(format!("{}.original", photo.id));
@@ -721,6 +833,7 @@ impl Repository {
                 history_checked: true,
                 crop: None,
                 emoji_status: None,
+                appearance: Appearance::default(),
             });
             Ok(())
         })
@@ -729,6 +842,13 @@ impl Repository {
         let path = self.photo_path(id)?;
         self.update(|library| {
             library.photos.retain(|p| p.id != id);
+            if library
+                .pending_photo_appearance
+                .as_ref()
+                .is_some_and(|pending| pending.photo_id == id)
+            {
+                library.pending_photo_appearance = None;
+            }
             if library
                 .pending_photo_status
                 .as_ref()
@@ -847,8 +967,117 @@ mod tests {
             history_checked: true,
             crop: None,
             emoji_status: None,
+            appearance: Appearance::default(),
         }
     }
+    #[test]
+    fn opening_legacy_conflict_stops_independent_rotation_and_preserves_photo_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let appearance = Appearance {
+            profile: Some(AppearanceValue::default()),
+            name: None,
+        };
+        let settings = Settings {
+            enabled: true,
+            ..Settings::default()
+        };
+        let mut linked = photo("a");
+        linked.appearance = appearance.clone();
+        let library = Library {
+            photos: vec![linked],
+            appearance_presets: vec![Appearance::default()],
+            appearance_settings: settings.clone(),
+            applied_appearance_settings: Some(settings),
+            next_appearance_rotation_at: Some(0),
+            pending_appearance_index: Some(0),
+            last_appearance_index: Some(0),
+            pending_photo_appearance: Some(PendingPhotoAppearance {
+                photo_id: "a".into(),
+                appearance,
+                retry_at: 42,
+            }),
+            ..Library::default()
+        };
+        fs::write(
+            dir.path().join("library.json"),
+            serde_json::to_vec(&library).unwrap(),
+        )
+        .unwrap();
+        let repository = Repository::open(dir.path().into()).unwrap();
+        let loaded = &repository.data;
+        assert!(!loaded.appearance_settings.enabled);
+        assert!(loaded.applied_appearance_settings.is_none());
+        assert!(loaded.next_appearance_rotation_at.is_none());
+        assert!(loaded.pending_appearance_index.is_none());
+        assert_eq!(loaded.last_appearance_index, Some(0));
+        assert_eq!(loaded.appearance_presets.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&loaded.pending_photo_appearance).unwrap(),
+            serde_json::to_value(&library.pending_photo_appearance).unwrap()
+        );
+    }
+
+    #[test]
+    fn photo_appearance_interrupts_rotation_until_last_link_is_cleared() {
+        for appearance in [
+            Appearance {
+                profile: Some(AppearanceValue::default()),
+                name: None,
+            },
+            Appearance {
+                profile: None,
+                name: Some(AppearanceValue::default()),
+            },
+        ] {
+            let settings = Settings {
+                enabled: true,
+                ..Settings::default()
+            };
+            let mut library = Library {
+                photos: vec![photo("a")],
+                appearance_presets: vec![Appearance::default()],
+                last_appearance_index: Some(0),
+                pending_photo_appearance: Some(PendingPhotoAppearance {
+                    photo_id: "a".into(),
+                    appearance: appearance.clone(),
+                    retry_at: 42,
+                }),
+                ..Library::default()
+            };
+            library
+                .update_appearance_settings(settings.clone(), 0)
+                .unwrap();
+            library.pending_appearance_index = Some(0);
+            library.set_photo_appearance("a", appearance).unwrap();
+            assert!(!library.appearance_settings.enabled);
+            assert!(library.applied_appearance_settings.is_none());
+            assert!(library.next_appearance_rotation_at.is_none());
+            assert!(library.pending_appearance_index.is_none());
+            assert_eq!(library.last_appearance_index, Some(0));
+            assert_eq!(
+                library.pending_photo_appearance.as_ref().unwrap().retry_at,
+                42
+            );
+            let error = library
+                .update_appearance_settings(settings.clone(), 0)
+                .unwrap_err();
+            assert_eq!(
+                crate::messages::MessageInfo::from_error(&error).code,
+                "validation.photo_appearance_rotation_conflict"
+            );
+            library
+                .update_appearance_settings(Settings::default(), 0)
+                .unwrap();
+            library
+                .set_photo_appearance("a", Appearance::default())
+                .unwrap();
+            assert!(library.applied_appearance_settings.is_none());
+            assert!(!library.appearance_settings.enabled);
+            library.update_appearance_settings(settings, 100).unwrap();
+            assert!(library.applied_appearance_settings.is_some());
+        }
+    }
+
     #[test]
     fn photo_status_compatibility_and_conflict_lifecycle() {
         let legacy: Photo = serde_json::from_str(r#"{"id":"a","name":"a"}"#).unwrap();
@@ -1637,5 +1866,73 @@ mod tests {
             .write_to(&mut png, image::ImageFormat::Png)
             .unwrap();
         assert!(normalize_photo(png.get_ref()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod appearance_tests {
+    use super::*;
+    #[test]
+    fn appearance_distinguishes_unchanged_and_reset_and_loads_legacy() {
+        let appearance: Appearance = serde_json::from_value(
+            serde_json::json!({"profile": null, "name": {"color": null, "emoji": null}}),
+        )
+        .unwrap();
+        assert!(appearance.profile.is_none());
+        assert!(appearance.name.is_some());
+        assert_eq!(
+            serde_json::to_value(&appearance).unwrap()["name"],
+            serde_json::json!({"color":null,"emoji":null})
+        );
+        let library: Library = serde_json::from_str("{}").unwrap();
+        assert!(library.appearance_presets.is_empty());
+        assert!(!library.appearance_settings.enabled);
+    }
+    #[test]
+    fn paired_rotation_and_pending_retry_obey_shared_cooldown_independently() {
+        let mut library = Library::default();
+        assert!(
+            library
+                .update_appearance_settings(
+                    Settings {
+                        enabled: true,
+                        ..Settings::default()
+                    },
+                    10
+                )
+                .is_err()
+        );
+        library.appearance_presets = vec![Appearance::default(), Appearance::default()];
+        library
+            .update_appearance_settings(
+                Settings {
+                    enabled: true,
+                    interval_secs: 60,
+                    jitter_secs: Some(0),
+                    ..Settings::default()
+                },
+                10,
+            )
+            .unwrap();
+        assert_eq!(library.next_appearance_index(), Some(0));
+        library.last_appearance_index = Some(0);
+        assert_eq!(library.next_appearance_index(), Some(1));
+        library.pending_photo_appearance = Some(PendingPhotoAppearance {
+            photo_id: "photo".into(),
+            appearance: Appearance::default(),
+            retry_at: 20,
+        });
+        library.defer_telegram(100);
+        assert_eq!(
+            library.pending_photo_appearance.as_ref().unwrap().retry_at,
+            100
+        );
+        assert_eq!(library.next_appearance_rotation_at, Some(100));
+        assert!(library.applied_settings.is_none());
+        assert!(library.applied_emoji_settings.is_none());
+        let saved: Library =
+            serde_json::from_value(serde_json::to_value(&library).unwrap()).unwrap();
+        assert_eq!(saved.last_appearance_index, Some(0));
+        assert_eq!(saved.pending_photo_appearance.unwrap().photo_id, "photo");
     }
 }

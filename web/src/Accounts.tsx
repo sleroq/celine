@@ -15,7 +15,6 @@ export function AccountMenu(
         accounts: AccountSummary[];
         activeId: string;
         now: number;
-        unsaved: boolean;
     },
 ) {
     const [open, setOpen] = createSignal(false);
@@ -92,9 +91,6 @@ export function AccountMenu(
                     role="group"
                     aria-label={t("accountsTelegram")}
                 >
-                    <Show when={props.unsaved}>
-                        <p role="status">{t("finishSavingBeforeSwitch")}</p>
-                    </Show>
                     <ul class="account-list">
                         <For
                             each={props.accounts

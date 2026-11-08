@@ -52,14 +52,15 @@ export const CheckboxControl = (props: CheckboxControlProps) => {
         <CheckboxPrimitive.Control
             data-slot="checkbox-control"
             class={cx(
-                "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring bg-muted text-foreground data-checked:bg-accent data-checked:text-accent-foreground data-invalid:outline-2 data-invalid:outline-danger flex size-4 shrink-0 items-center justify-center rounded-sm border-0 outline-none data-disabled:cursor-not-allowed data-disabled:opacity-50",
+                "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring bg-muted text-foreground data-checked:bg-accent data-checked:text-accent-foreground data-invalid:outline-2 data-invalid:outline-danger flex size-4 shrink-0 items-center justify-center rounded-sm border-0 outline-none data-disabled:cursor-not-allowed data-disabled:opacity-50 motion-safe:transition-colors motion-safe:duration-150",
                 props.class,
             )}
             {...rest}
         >
             <CheckboxPrimitive.Indicator
+                forceMount
                 data-slot="checkbox-indicator"
-                class="flex items-center justify-center text-current transition-none"
+                class="flex scale-75 items-center justify-center text-current opacity-0 data-checked:scale-100 data-checked:opacity-100 data-indeterminate:scale-100 data-indeterminate:opacity-100 motion-safe:transition-[scale,opacity] motion-safe:duration-150 motion-safe:ease-out"
             >
                 <svg
                     aria-hidden="true"

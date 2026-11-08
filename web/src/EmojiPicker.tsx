@@ -1,10 +1,21 @@
-import { createEffect, createSignal, For, onCleanup, onSettled, Show, untrack } from "solid-js";
+import { DEFAULT_EMOJI_ID, DefaultEmojiGlyph } from "./default-emoji";
+import {
+    createEffect,
+    createSignal,
+    createUniqueId,
+    For,
+    onCleanup,
+    onSettled,
+    Show,
+    untrack,
+} from "solid-js";
 import type { AccountApi, EmojiChoice } from "./api";
 import { createAutosave } from "./autosave";
 import { createEmojiPacks } from "./emoji-packs";
 import { createEmojiSearch } from "./emoji-search";
 import { emojiDisplayName } from "./display-names";
 import { EmojiMedia } from "./EmojiMedia";
+import { EmojiArtworkPreview } from "./EmojiArtworkPreview";
 import { EmojiChoicePreview } from "./EmojiChoicePreview";
 import { SortableList } from "./SortableList";
 import { resetTilt, tilt } from "./tilt";
@@ -18,7 +29,7 @@ function emojiSource(emoji: EmojiChoice): string {
     return emoji.source;
 }
 
-function EmojiChoices(props: {
+export function EmojiChoices(props: {
     active: boolean;
     choices: EmojiChoice[];
     api: AccountApi;
@@ -27,36 +38,48 @@ function EmojiChoices(props: {
     toggle: (id: string) => void;
     single?: boolean;
 }) {
+    const groupName = createUniqueId();
+
     return (
         <div class="emojis">
             <For each={props.choices}>
                 {(emoji) => (
-                    <label
-                        class="emoji-choice"
-                        title={
-                            emoji.source_kind === "collectible"
-                                ? emojiDisplayName(emoji.label)
-                                : emojiSource(emoji)
-                        }
-                        onPointerMove={tilt}
-                        onPointerLeave={resetTilt}
-                        onPointerCancel={resetTilt}
+                    <EmojiArtworkPreview
+                        enabled={props.active && !props.busy}
+                        url={props.api.emojiMediaUrl(emoji.document_id ?? emoji.id)}
+                        label={emojiDisplayName(emoji.label)}
+                        textColor={emoji.text_color}
                     >
-                        <input
-                            type={props.single ? "radio" : "checkbox"}
-                            name={props.single ? "photo-emoji-status" : undefined}
-                            aria-label={`${emojiDisplayName(emoji.label)} (${emojiSource(emoji)})`}
-                            checked={props.selected.includes(emoji.id)}
-                            disabled={props.busy}
-                            onChange={() => props.toggle(emoji.id)}
-                        />
-                        <EmojiChoicePreview
-                            active={props.active}
-                            url={props.api.emojiMediaUrl(emoji.document_id ?? emoji.id)}
-                            label={emojiDisplayName(emoji.label)}
-                            textColor={emoji.text_color}
-                        />
-                    </label>
+                        {(ref) => (
+                            <label
+                                ref={ref}
+                                class="emoji-choice"
+                                title={
+                                    emoji.source_kind === "collectible"
+                                        ? emojiDisplayName(emoji.label)
+                                        : emojiSource(emoji)
+                                }
+                                onPointerMove={tilt}
+                                onPointerLeave={resetTilt}
+                                onPointerCancel={resetTilt}
+                            >
+                                <input
+                                    type={props.single ? "radio" : "checkbox"}
+                                    name={props.single ? groupName : undefined}
+                                    aria-label={`${emojiDisplayName(emoji.label)} (${emojiSource(emoji)})`}
+                                    checked={props.selected.includes(emoji.id)}
+                                    disabled={props.busy}
+                                    onChange={() => props.toggle(emoji.id)}
+                                />
+                                <EmojiChoicePreview
+                                    active={props.active}
+                                    url={props.api.emojiMediaUrl(emoji.document_id ?? emoji.id)}
+                                    label={emojiDisplayName(emoji.label)}
+                                    textColor={emoji.text_color}
+                                />
+                            </label>
+                        )}
+                    </EmojiArtworkPreview>
                 )}
             </For>
         </div>
@@ -90,7 +113,7 @@ export function EmojiPicker(props: {
     api: AccountApi;
     busy: boolean;
     single?: boolean;
-    choose?: (id: string) => void;
+    choose?: (id: string | null) => void;
     dismiss?: () => void;
     active: boolean;
     notify: (message: string, action?: () => void) => void;
@@ -128,7 +151,7 @@ export function EmojiPicker(props: {
 
     function toggle(id: string) {
         if (props.single) {
-            props.choose?.(id);
+            props.choose?.(id === DEFAULT_EMOJI_ID ? null : id);
             return;
         }
         save(
@@ -168,8 +191,15 @@ export function EmojiPicker(props: {
                                 props.selectedEmojis.find((emoji) => emoji.id === id);
                             return {
                                 id,
-                                label: emojiDisplayName(choice?.label ?? id),
-                                mediaUrl: props.api.emojiMediaUrl(choice?.document_id ?? id),
+                                label:
+                                    id === DEFAULT_EMOJI_ID
+                                        ? t("noEmojiStatus")
+                                        : emojiDisplayName(choice?.label ?? id),
+                                mediaUrl:
+                                    id === DEFAULT_EMOJI_ID
+                                        ? undefined
+                                        : props.api.emojiMediaUrl(choice?.document_id ?? id),
+                                defaultEmoji: id === DEFAULT_EMOJI_ID,
                                 textColor: choice?.text_color,
                             };
                         })}
@@ -331,6 +361,23 @@ export function EmojiPicker(props: {
                                     </Button>
                                 </Show>
                             </div>
+                            <Show when={!packs.activeId}>
+                                <div class="emojis">
+                                    <label class="emoji-choice" title={t("noEmojiStatus")}>
+                                        <input
+                                            type={props.single ? "radio" : "checkbox"}
+                                            aria-label={t("noEmojiStatus")}
+                                            checked={
+                                                selected().includes(DEFAULT_EMOJI_ID) ||
+                                                (!!props.single && !selected().length)
+                                            }
+                                            disabled={props.busy}
+                                            onChange={() => toggle(DEFAULT_EMOJI_ID)}
+                                        />
+                                        <DefaultEmojiGlyph />
+                                    </label>
+                                </div>
+                            </Show>
                             <Show when={!packs.active || packs.active.loading}>
                                 <p class="visually-hidden" role="status">
                                     {t("loadingEmoji")}

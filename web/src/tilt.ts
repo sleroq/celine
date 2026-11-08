@@ -1,14 +1,14 @@
-export function tilt(event: PointerEvent & { currentTarget: HTMLElement }) {
+export function tilt(event: PointerEvent & { currentTarget: HTMLElement }, strength = 28) {
     if (event.pointerType !== "mouse") return;
     const element = event.currentTarget;
     const rect = element.getBoundingClientRect();
     element.style.setProperty(
         "--tilt-x",
-        `${((rect.top + rect.height / 2 - event.clientY) / rect.height) * 28}deg`,
+        `${((rect.top + rect.height / 2 - event.clientY) / rect.height) * strength}deg`,
     );
     element.style.setProperty(
         "--tilt-y",
-        `${((event.clientX - rect.left - rect.width / 2) / rect.width) * 28}deg`,
+        `${((event.clientX - rect.left - rect.width / 2) / rect.width) * strength}deg`,
     );
 }
 

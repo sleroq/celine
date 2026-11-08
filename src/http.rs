@@ -26,6 +26,15 @@ pub const ADDRESS: &str = "127.0.0.1:7766";
 
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
+        .route("/api/appearance/catalog", get(appearance_catalog))
+        .route("/api/appearance/apply", put(apply_appearance))
+        .route("/api/appearance/presets", put(appearance_presets))
+        .route("/api/appearance/settings", put(appearance_settings))
+        .route(
+            "/api/appearance/settings/{action}",
+            post(appearance_schedule),
+        )
+        .route("/api/photos/{id}/appearance", put(photo_appearance))
         .route("/api/state", get(state))
         .route("/api/settings", put(settings))
         .route("/api/settings/{action}", post(photo_schedule))
@@ -834,6 +843,77 @@ async fn assets(request: Request<Body>) -> Response {
             ([(header::CONTENT_TYPE, mime)], file.contents()).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn appearance_catalog(State(app): State<Arc<App>>) -> Response {
+    let result = match app.connection().await {
+        Ok(mut connection) => match connection.as_mut() {
+            Some(telegram) => telegram.appearance_catalog().await,
+            None => Err(unavailable()),
+        },
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(catalog) => Json(catalog).into_response(),
+        Err(error) => {
+            app.record_telegram_error(&error).await;
+            bad(error.into())
+        }
+    }
+}
+async fn apply_appearance(
+    State(app): State<Arc<App>>,
+    Json(value): Json<crate::library::Appearance>,
+) -> Response {
+    let result = app.apply_appearance(&value).await;
+    match result {
+        Ok(()) => ok(),
+        Err(error) => {
+            app.record_telegram_error(&error).await;
+            bad(error.into())
+        }
+    }
+}
+#[derive(Deserialize)]
+struct AppearancePresets {
+    presets: Vec<crate::library::Appearance>,
+}
+async fn appearance_presets(
+    State(app): State<Arc<App>>,
+    Json(value): Json<AppearancePresets>,
+) -> Response {
+    match app.save_appearance_presets(value.presets).await {
+        Ok(()) => ok(),
+        Err(error) => bad(error),
+    }
+}
+async fn photo_appearance(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Json(value): Json<crate::library::Appearance>,
+) -> Response {
+    match app.save_photo_appearance(&id, value).await {
+        Ok(()) => ok(),
+        Err(error) => bad(error),
+    }
+}
+async fn appearance_settings(State(app): State<Arc<App>>, Json(value): Json<Settings>) -> Response {
+    match app.save_appearance_settings(value).await {
+        Ok(()) => ok(),
+        Err(error) => bad(error),
+    }
+}
+async fn appearance_schedule(State(app): State<Arc<App>>, Path(action): Path<String>) -> Response {
+    let action = match action.as_str() {
+        "start" => ScheduleAction::Start,
+        "stop" => ScheduleAction::Stop,
+        "apply" => ScheduleAction::Apply,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    match app.schedule_appearance(action).await {
+        Ok(()) => ok(),
+        Err(error) => bad(error),
     }
 }
 

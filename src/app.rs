@@ -32,6 +32,25 @@ impl PhotoHistoryClient for Telegram {
     }
 }
 
+trait AppearanceClient {
+    async fn apply_appearance(
+        &mut self,
+        appearance: &crate::library::Appearance,
+    ) -> Result<(), TelegramError>;
+    fn profile(&self) -> Option<Profile>;
+}
+impl AppearanceClient for Telegram {
+    async fn apply_appearance(
+        &mut self,
+        appearance: &crate::library::Appearance,
+    ) -> Result<(), TelegramError> {
+        Telegram::apply_appearance(self, appearance).await
+    }
+    fn profile(&self) -> Option<Profile> {
+        Telegram::profile(self)
+    }
+}
+
 trait PhotoClient {
     async fn set_emoji_status(&mut self, id: Option<&str>) -> Result<(), TelegramError>;
     async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError>;
@@ -139,6 +158,7 @@ pub struct App {
     photo_error: RwLock<Option<LocalizedMessage>>,
     photo_status_error: RwLock<Option<LocalizedMessage>>,
     emoji_error: RwLock<Option<LocalizedMessage>>,
+    appearance_error: RwLock<Option<LocalizedMessage>>,
     credentials: Option<Credentials>,
     dir: PathBuf,
 }
@@ -173,6 +193,7 @@ impl App {
             photo_error: RwLock::new(None),
             photo_status_error: RwLock::new(None),
             emoji_error: RwLock::new(None),
+            appearance_error: RwLock::new(None),
             credentials,
             dir,
         }))
@@ -222,7 +243,8 @@ impl App {
             .clone()
             .or(self.photo_error.read().await.clone())
             .or(self.photo_status_error.read().await.clone())
-            .or(self.emoji_error.read().await.clone());
+            .or(self.emoji_error.read().await.clone())
+            .or(self.appearance_error.read().await.clone());
         let recovery = if *self.photo_cache_status.read().await == PhotoCacheStatus::Ready
             && photo_cache.complete()
         {
@@ -350,8 +372,9 @@ impl App {
         let choices = self.choices.lock().await;
         let mut selected = Vec::new();
         for id in ids {
-            let choice = choices
-                .iter()
+            let default_choice = EmojiChoice::no_status();
+            let choice = std::iter::once(&default_choice)
+                .chain(choices.iter())
                 .find(|choice| &choice.id == id)
                 .context(Message::new(
                     "emoji.catalog_refresh_required",
@@ -411,11 +434,13 @@ impl App {
                     })
                     .cloned();
                 if let Some(photo) = active {
-                    queued = true;
-                    library.pending_photo_status = Some(PendingPhotoStatus {
-                        photo_id: photo.id,
-                        status_id: photo.emoji_status.map(|status| status.id),
-                        retry_at: now(),
+                    library.pending_photo_status = photo.emoji_status.map(|status| {
+                        queued = true;
+                        PendingPhotoStatus {
+                            photo_id: photo.id,
+                            status_id: Some(status.id),
+                            retry_at: now(),
+                        }
                     });
                 }
                 Ok(())
@@ -445,19 +470,26 @@ impl App {
             .lock()
             .await
             .update(|library| {
-                library.pending_photo_status = if library.has_photo_statuses() {
-                    library
-                        .photos
-                        .iter()
-                        .find(|photo| photo.id == id)
-                        .map(|photo| PendingPhotoStatus {
-                            photo_id: photo.id.clone(),
-                            status_id: photo.emoji_status.as_ref().map(|status| status.id.clone()),
-                            retry_at: now(),
-                        })
-                } else {
-                    None
-                };
+                library.pending_photo_appearance = library
+                    .photos
+                    .iter()
+                    .find(|photo| photo.id == id)
+                    .filter(|photo| !photo.appearance.is_empty())
+                    .map(|photo| crate::library::PendingPhotoAppearance {
+                        photo_id: id.into(),
+                        appearance: photo.appearance.clone(),
+                        retry_at: now(),
+                    });
+                library.pending_photo_status = library
+                    .photos
+                    .iter()
+                    .find(|photo| photo.id == id)
+                    .and_then(|photo| photo.emoji_status.as_ref())
+                    .map(|status| PendingPhotoStatus {
+                        photo_id: id.into(),
+                        status_id: Some(status.id.clone()),
+                        retry_at: now(),
+                    });
                 Ok(())
             })
             .map_err(storage_error)?;
@@ -505,9 +537,8 @@ impl App {
                 .map_err(storage_error)?;
             pending
         };
-        if let Err(error) = telegram
-            .set_emoji_status(pending.status_id.as_deref())
-            .await
+        if let Some(status_id) = pending.status_id.as_deref()
+            && let Err(error) = telegram.set_emoji_status(Some(status_id)).await
         {
             self.defer_photo_status(&error).await?;
             return Err(error);
@@ -1033,6 +1064,19 @@ impl App {
                     return Err(error);
                 }
             }
+            if !premium {
+                self.stop_nonpremium_emoji_rotation().await?;
+            }
+            if let Err(error) = self.rotate_appearance_if_due(telegram).await {
+                *self.appearance_error.write().await = Some(LocalizedMessage::new(
+                    error.message.clone(),
+                    error.message_info(),
+                ));
+                self.record_telegram_error(&error).await;
+                if blocks_telegram(&error) {
+                    return Err(error);
+                }
+            }
             if let Err(mut error) = self.rotate_emojis_if_due(telegram).await {
                 tracing::warn!(
                     code = error.info.code,
@@ -1058,6 +1102,22 @@ impl App {
     }
     async fn stop_nonpremium_emoji_rotation(&self) -> Result<(), TelegramError> {
         let mut repository = self.repository.lock().await;
+        if repository.data.applied_appearance_settings.is_some()
+            || repository.data.pending_photo_appearance.is_some()
+        {
+            repository
+                .update(|library| {
+                    let mut settings = library.appearance_settings.clone();
+                    settings.enabled = false;
+                    library.pending_photo_appearance = None;
+                    library.update_appearance_settings(settings, now())
+                })
+                .map_err(storage_error)?;
+            *self.appearance_error.write().await = Some(LocalizedMessage::new(
+                "Telegram Premium is required. Appearance rotation has stopped.",
+                MessageInfo::new("rotation.premium_required"),
+            ));
+        }
         if repository.data.applied_emoji_settings.is_some() {
             repository
                 .update(|library| {
@@ -1288,7 +1348,251 @@ impl App {
             .map_err(storage_error)?;
         Ok(true)
     }
-    async fn rotate_emojis_if_due(&self, telegram: &mut Telegram) -> Result<(), TelegramError> {
+    pub async fn apply_appearance(
+        &self,
+        appearance: &crate::library::Appearance,
+    ) -> Result<(), TelegramError> {
+        let mut connection = self.connection().await?;
+        let telegram = connection.as_mut().ok_or_else(unavailable)?;
+        let result = telegram.apply_appearance(appearance).await;
+        *self.profile.write().await = telegram.profile();
+        result
+    }
+    pub async fn save_appearance_settings(&self, mut settings: Settings) -> Result<()> {
+        settings.validate()?;
+        self.repository.lock().await.update(|library| {
+            settings.enabled = library.appearance_settings.enabled;
+            library.appearance_settings = settings;
+            Ok(())
+        })
+    }
+    pub async fn schedule_appearance(&self, action: ScheduleAction) -> Result<()> {
+        let mut repository = self.repository.lock().await;
+        if !matches!(action, ScheduleAction::Stop) {
+            repository.data.check_appearance_rotation()?;
+        }
+        let mut settings = repository.data.appearance_settings.clone();
+        settings.enabled = match action {
+            ScheduleAction::Start => true,
+            ScheduleAction::Stop => false,
+            ScheduleAction::Apply => repository.data.applied_appearance_settings.is_some(),
+        };
+        if settings.enabled {
+            let auth = self.auth.read().await;
+            if auth.status != "authorized" || !auth.premium {
+                bail!(Message::new(
+                    "rotation.premium_required_to_start",
+                    "Log in with Telegram Premium before starting appearance rotation."
+                ));
+            }
+        }
+        repository.update(|library| library.update_appearance_settings(settings, now()))?;
+        *self.appearance_error.write().await = None;
+        Ok(())
+    }
+    async fn validate_saved_appearance(
+        &self,
+        appearance: &crate::library::Appearance,
+    ) -> Result<()> {
+        if [&appearance.profile, &appearance.name]
+            .into_iter()
+            .flatten()
+            .any(|value| value.emoji.is_some())
+        {
+            let mut connection = self.connection().await?;
+            connection
+                .as_mut()
+                .ok_or_else(unavailable)?
+                .validate_appearance(appearance)
+                .await?;
+        }
+        Ok(())
+    }
+    pub async fn save_appearance_presets(
+        &self,
+        presets: Vec<crate::library::Appearance>,
+    ) -> Result<()> {
+        for appearance in &presets {
+            self.validate_saved_appearance(appearance).await?;
+        }
+        self.repository.lock().await.update(|library| {
+            library.appearance_presets = presets;
+            library.last_appearance_index = None;
+            library.pending_appearance_index = None;
+            if library.appearance_presets.is_empty() {
+                let mut settings = library.appearance_settings.clone();
+                settings.enabled = false;
+                library.update_appearance_settings(settings, now())?;
+            }
+            Ok(())
+        })?;
+        *self.appearance_error.write().await = None;
+        Ok(())
+    }
+    pub async fn save_photo_appearance(
+        &self,
+        id: &str,
+        appearance: crate::library::Appearance,
+    ) -> Result<()> {
+        self.validate_saved_appearance(&appearance).await?;
+        let mut connection = self.lock_telegram().await;
+        let queued = {
+            let mut repository = self.repository.lock().await;
+            let mut queued = false;
+            repository.update(|library| {
+                library.set_photo_appearance(id, appearance.clone())?;
+                if library
+                    .pending_photo_appearance
+                    .as_ref()
+                    .is_some_and(|pending| pending.photo_id == id)
+                {
+                    library.pending_photo_appearance = None;
+                }
+                if library.applied_settings.is_some()
+                    && library.last_photo_id.as_deref() == Some(id)
+                    && !appearance.is_empty()
+                {
+                    queued = true;
+                    library.pending_photo_appearance =
+                        Some(crate::library::PendingPhotoAppearance {
+                            photo_id: id.into(),
+                            appearance,
+                            retry_at: now(),
+                        });
+                }
+                Ok(())
+            })?;
+            if queued || repository.data.pending_photo_appearance.is_none() {
+                *self.appearance_error.write().await = None;
+            }
+            queued
+        };
+        if queued {
+            let result = match connection.as_mut() {
+                Some(telegram) => self.rotate_appearance_if_due(telegram).await,
+                None => {
+                    let error = unavailable();
+                    self.defer_photo_appearance(&error).await?;
+                    Err(error)
+                }
+            };
+            if let Err(error) = result {
+                *self.appearance_error.write().await = Some(LocalizedMessage::new(
+                    error.message.clone(),
+                    error.message_info(),
+                ));
+                self.record_telegram_error(&error).await;
+                return Err(error.into());
+            }
+        }
+        Ok(())
+    }
+    async fn defer_photo_appearance(&self, error: &TelegramError) -> Result<(), TelegramError> {
+        self.repository
+            .lock()
+            .await
+            .update(|library| {
+                if let Some(pending) = &mut library.pending_photo_appearance {
+                    pending.retry_at = now()
+                        .saturating_add(error.retry_after.unwrap_or(30).max(2))
+                        .max(library.telegram_not_before.unwrap_or(0));
+                }
+                Ok(())
+            })
+            .map_err(storage_error)
+    }
+    async fn rotate_appearance_if_due(
+        &self,
+        telegram: &mut impl AppearanceClient,
+    ) -> Result<(), TelegramError> {
+        let (appearance, index, photo) = {
+            let mut repository = self.repository.lock().await;
+            let library = &repository.data;
+            if now() < library.telegram_not_before.unwrap_or(0) {
+                return Ok(());
+            }
+            let pending = library
+                .pending_photo_appearance
+                .as_ref()
+                .filter(|pending| pending.retry_at <= now());
+            let (appearance, index, photo) = if let Some(pending) = pending {
+                (pending.appearance.clone(), None, true)
+            } else if library.applied_appearance_settings.is_some()
+                && library
+                    .next_appearance_rotation_at
+                    .is_none_or(|due| due <= now())
+            {
+                let Some(index) = library
+                    .pending_appearance_index
+                    .or_else(|| library.next_appearance_index())
+                else {
+                    return Ok(());
+                };
+                (
+                    library.appearance_presets[index].clone(),
+                    Some(index),
+                    false,
+                )
+            } else {
+                return Ok(());
+            };
+            repository
+                .update(|library| {
+                    if photo {
+                        library.pending_photo_appearance.as_mut().unwrap().retry_at =
+                            now().saturating_add(30);
+                    } else {
+                        library.pending_appearance_index = index;
+                        library.next_appearance_rotation_at = Some(now().saturating_add(30));
+                    }
+                    Ok(())
+                })
+                .map_err(storage_error)?;
+            (appearance, index, photo)
+        };
+        let result = telegram.apply_appearance(&appearance).await;
+        *self.profile.write().await = telegram.profile();
+        if let Err(error) = result {
+            if !photo {
+                self.repository
+                    .lock()
+                    .await
+                    .update(|library| {
+                        library.next_appearance_rotation_at = Some(
+                            now()
+                                .saturating_add(error.retry_after.unwrap_or(30).max(2))
+                                .max(library.telegram_not_before.unwrap_or(0)),
+                        );
+                        Ok(())
+                    })
+                    .map_err(storage_error)?;
+            }
+            if photo {
+                self.defer_photo_appearance(&error).await?;
+            }
+            return Err(error);
+        }
+        *self.profile.write().await = telegram.profile();
+        *self.appearance_error.write().await = None;
+        self.repository
+            .lock()
+            .await
+            .update(|library| {
+                if photo {
+                    library.pending_photo_appearance = None;
+                } else {
+                    library.last_appearance_index = index;
+                    library.pending_appearance_index = None;
+                    library.next_appearance_rotation_at = library
+                        .applied_appearance_settings
+                        .as_ref()
+                        .map(|settings| settings.next_at(now()));
+                }
+                Ok(())
+            })
+            .map_err(storage_error)
+    }
+    async fn rotate_emojis_if_due(&self, telegram: &mut impl PhotoClient) -> Result<(), TelegramError> {
         let id = {
             let mut repository = self.repository.lock().await;
             if !emoji_rotation_due(&repository.data, now()) {
@@ -1313,7 +1617,9 @@ impl App {
             id
         };
         tracing::info!("Emoji rotation attempted");
-        telegram.set_emoji_status(Some(&id)).await?;
+        telegram
+            .set_emoji_status((id != crate::telegram::DEFAULT_EMOJI_ID).then_some(id.as_str()))
+            .await?;
         self.repository
             .lock()
             .await
@@ -1426,8 +1732,227 @@ mod tests {
         serde_json::from_value(serde_json::json!({"id":"collectible:100","document_id":"42","label":"Gift","source":"Gift","text_color":false})).unwrap()
     }
 
+    struct FailedAppearance {
+        attempts: usize,
+        fail: bool,
+    }
+    impl AppearanceClient for FailedAppearance {
+        async fn apply_appearance(
+            &mut self,
+            _: &crate::library::Appearance,
+        ) -> Result<(), TelegramError> {
+            self.attempts += 1;
+            if self.fail {
+                let mut error = unavailable();
+                error.retry_after = Some(60);
+                Err(error)
+            } else {
+                Ok(())
+            }
+        }
+        fn profile(&self) -> Option<Profile> {
+            Some(Profile {
+                name: "After partial update".into(),
+                premium: true,
+                photo_url: None,
+                emoji: None,
+                appearance: crate::library::Appearance::default(),
+                appearance_collectible_conflict: false,
+                updated_at: 1,
+            })
+        }
+    }
     #[tokio::test]
-    async fn photo_statuses_apply_clear_and_do_not_replay_photo_after_status_failure() {
+    async fn linked_photo_blocks_appearance_start_and_apply_but_not_stop() {
+        let (_dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+        app.save_photo_appearance(
+            "a",
+            crate::library::Appearance {
+                profile: Some(crate::library::AppearanceValue::default()),
+                name: None,
+            },
+        )
+        .await
+        .unwrap();
+        for action in [ScheduleAction::Start, ScheduleAction::Apply] {
+            let error = app.schedule_appearance(action).await.unwrap_err();
+            assert_eq!(
+                crate::messages::MessageInfo::from_error(&error).code,
+                "validation.photo_appearance_rotation_conflict"
+            );
+        }
+        app.schedule_appearance(ScheduleAction::Stop).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn appearance_failure_retries_same_preset_and_publishes_partial_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::open(dir.path().into(), None).unwrap();
+        app.save_appearance_presets(vec![
+            crate::library::Appearance::default(),
+            crate::library::Appearance::default(),
+        ])
+        .await
+        .unwrap();
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.update_appearance_settings(
+                    Settings {
+                        enabled: true,
+                        mode: crate::library::Mode::Random,
+                        interval_secs: 3600,
+                        jitter_secs: Some(0),
+                    },
+                    now(),
+                )?;
+                library.next_appearance_rotation_at = Some(0);
+                Ok(())
+            })
+            .unwrap();
+        let mut client = FailedAppearance {
+            attempts: 0,
+            fail: true,
+        };
+        let before = now();
+        assert!(app.rotate_appearance_if_due(&mut client).await.is_err());
+        let library = app.state().await.library;
+        assert!((before + 60..=now() + 60).contains(&library.next_appearance_rotation_at.unwrap()));
+        let pending = library.pending_appearance_index.unwrap();
+        assert!(library.last_appearance_index.is_none());
+        assert_eq!(
+            app.state().await.profile.unwrap().name,
+            "After partial update"
+        );
+        app.rotate_appearance_if_due(&mut client).await.unwrap();
+        assert_eq!(client.attempts, 1);
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.next_appearance_rotation_at = Some(0);
+                Ok(())
+            })
+            .unwrap();
+        client.fail = false;
+        app.rotate_appearance_if_due(&mut client).await.unwrap();
+        let library = app.state().await.library;
+        assert_eq!(library.last_appearance_index, Some(pending));
+        assert!(library.pending_appearance_index.is_none());
+        assert!(library.next_appearance_rotation_at.unwrap() >= before + 3600);
+    }
+    #[tokio::test]
+    async fn premium_loss_cancels_pending_appearance_and_stop_clears_error() {
+        use crate::library::{Appearance, PendingPhotoAppearance};
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::open(dir.path().into(), None).unwrap();
+        app.save_appearance_presets(vec![Appearance::default()])
+            .await
+            .unwrap();
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.update_appearance_settings(
+                    Settings {
+                        enabled: true,
+                        ..Settings::default()
+                    },
+                    now(),
+                )?;
+                library.pending_photo_appearance = Some(PendingPhotoAppearance {
+                    photo_id: "a".into(),
+                    appearance: Appearance::default(),
+                    retry_at: 0,
+                });
+                Ok(())
+            })
+            .unwrap();
+        app.stop_nonpremium_emoji_rotation().await.unwrap();
+        let library = app.state().await.library;
+        assert!(library.applied_appearance_settings.is_none());
+        assert!(library.pending_photo_appearance.is_none());
+        assert!(app.appearance_error.read().await.is_some());
+        app.schedule_appearance(ScheduleAction::Stop).await.unwrap();
+        assert!(app.appearance_error.read().await.is_none());
+        *app.appearance_error.write().await = Some("Obsolete".into());
+        app.save_appearance_presets(vec![]).await.unwrap();
+        assert!(app.appearance_error.read().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn active_photo_appearance_edits_replace_retry_and_unset_sections_do_not_apply() {
+        use crate::library::{Appearance, AppearanceValue};
+        let (_dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.last_photo_id = Some("a".into());
+                Ok(())
+            })
+            .unwrap();
+        let before = now();
+        assert!(
+            app.save_photo_appearance(
+                "a",
+                Appearance {
+                    profile: Some(AppearanceValue {
+                        color: Some(42),
+                        emoji: None
+                    }),
+                    name: None,
+                }
+            )
+            .await
+            .is_err()
+        );
+        let pending = app.state().await.library.pending_photo_appearance.unwrap();
+        assert_eq!(pending.appearance.profile.unwrap().color, Some(42));
+        assert!(pending.appearance.name.is_none());
+        assert!(pending.retry_at >= before + 30);
+        assert!(
+            app.save_photo_appearance(
+                "a",
+                Appearance {
+                    profile: None,
+                    name: Some(AppearanceValue::default()),
+                }
+            )
+            .await
+            .is_err()
+        );
+        let pending = app.state().await.library.pending_photo_appearance.unwrap();
+        assert!(pending.appearance.profile.is_none());
+        assert!(pending.appearance.name.is_some());
+        app.save_photo_appearance("a", Appearance::default())
+            .await
+            .unwrap();
+        assert!(app.state().await.library.pending_photo_appearance.is_none());
+        assert!(app.appearance_error.read().await.is_none());
+        app.repository
+            .lock()
+            .await
+            .update(|library| {
+                library.applied_settings = None;
+                Ok(())
+            })
+            .unwrap();
+        app.save_photo_appearance(
+            "a",
+            Appearance {
+                profile: Some(AppearanceValue::default()),
+                name: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(app.state().await.library.pending_photo_appearance.is_none());
+    }
+
+    #[tokio::test]
+    async fn photo_statuses_apply_and_do_not_clear_or_replay_photo_after_status_failure() {
         let mut first = photo("a", Some("1"), true);
         first.emoji_status = Some(status_choice());
         let (_dir, app) = photo_app(vec![first, photo("b", Some("2"), true)]).await;
@@ -1451,10 +1976,7 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        let mut client = FakePhotos::new([
-            PhotoCall::Use("2", Ok(true)),
-            PhotoCall::Status(None, Ok(())),
-        ]);
+        let mut client = FakePhotos::new([PhotoCall::Use("2", Ok(true))]);
         rotate_with_status(&app, &mut client).await.unwrap();
         client.assert_finished();
     }
@@ -1975,6 +2497,7 @@ mod tests {
             history_checked,
             crop: None,
             emoji_status: None,
+            appearance: crate::library::Appearance::default(),
         }
     }
 
@@ -2633,6 +3156,7 @@ mod tests {
                     history_checked: true,
                     crop: None,
                     emoji_status: None,
+                    appearance: crate::library::Appearance::default(),
                 });
                 library.update_settings(
                     Settings {
@@ -2718,6 +3242,31 @@ mod tests {
                 >= until
         );
     }
+    #[tokio::test]
+    async fn default_status_selection_survives_restart_and_clears_during_rotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::open(dir.path().into(), None).unwrap();
+        let default_id = crate::telegram::DEFAULT_EMOJI_ID.to_string();
+        let choice = EmojiChoice { id: "123".into(), ..EmojiChoice::no_status() };
+        app.remember_choices(std::slice::from_ref(&choice)).await;
+        app.select_emojis(&[choice.id.clone(), default_id.clone()]).await.unwrap();
+        app.select_emojis(&[default_id.clone(), choice.id.clone()]).await.unwrap();
+        drop(app);
+        let app = App::open(dir.path().into(), None).unwrap();
+        {
+            let mut repository = app.repository.lock().await;
+            assert_eq!(repository.data.selected_emojis[0].id, default_id);
+            repository.data.applied_emoji_settings = Some(repository.data.emoji_settings.clone());
+            repository.data.next_emoji_rotation_at = Some(0);
+        }
+        let mut telegram = FakePhotos::new([PhotoCall::Status(None, Ok(()))]);
+        app.rotate_emojis_if_due(&mut telegram).await.unwrap();
+        telegram.assert_finished();
+        assert_eq!(app.repository.lock().await.data.last_emoji_id.as_deref(), Some(default_id.as_str()));
+        app.select_emojis(std::slice::from_ref(&choice.id)).await.unwrap();
+        assert_eq!(app.repository.lock().await.data.selected_emojis.len(), 1);
+    }
+
     #[tokio::test]
     async fn emoji_choices_survive_restart_without_integer_precision_loss() {
         let dir = tempfile::tempdir().unwrap();

@@ -1,5 +1,8 @@
+import { createAutosave } from "./autosave";
+import { AppearanceEditor, unchangedAppearance } from "./Appearance";
+import type { Appearance, State } from "./api";
 import { photoDisplayName } from "./display-names";
-import { createSignal, onSettled, Show, untrack } from "solid-js";
+import { createSignal, onCleanup, Show, untrack } from "solid-js";
 import type { AccountApi, Photo } from "./api";
 import { CropEditor } from "./CropEditor";
 import { centeredCrop } from "./crop";
@@ -8,10 +11,12 @@ import { EmojiMedia } from "./EmojiMedia";
 import { RequestError } from "./api";
 import { Button } from "./components/ui";
 import { t } from "./i18n";
+import { Modal, ModalCloseFooter } from "./Modal";
 
 export function PhotoDialog(props: {
     api: AccountApi;
     photo: Photo;
+    profile: State["profile"];
     refresh: () => Promise<void>;
     close: () => void;
     premium: boolean;
@@ -25,6 +30,17 @@ export function PhotoDialog(props: {
         const target = props.premium ? chooseButton : closeButton;
         queueMicrotask(() => target.focus());
     }
+    const initialAppearance = untrack(() => props.photo.appearance ?? unchangedAppearance());
+    const { api, photoId, refresh } = untrack(() => ({
+        api: props.api,
+        photoId: props.photo.id,
+        refresh: props.refresh,
+    }));
+    const appearance = createAutosave<Appearance>(
+        (value) => api.request(`photos/${encodeURIComponent(photoId)}/appearance`, "PUT", value),
+        refresh,
+    );
+    onCleanup(appearance.dispose);
     const [editing, setEditing] = createSignal(false);
     const [saving, setSaving] = createSignal(false);
     const [choosing, setChoosing] = createSignal(untrack(() => !!props.chooseEmoji));
@@ -57,35 +73,19 @@ export function PhotoDialog(props: {
             top: `${((-crop.y * height) / size) * 100}%`,
         };
     };
-    onSettled(() => dialog.showModal());
+    function dismiss() {
+        if (saving()) return;
+        if (editing()) setEditing(false);
+        else props.close();
+    }
 
     return (
-        <dialog
-            class="w-[min(36rem,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] overflow-auto rounded-xl border-0 bg-surface p-5 text-foreground shadow-xl backdrop:bg-black/65"
+        <Modal
+            label={t("photoSettings")}
             ref={(element) => {
                 dialog = element;
             }}
-            aria-label={t("photoSettings")}
-            onCancel={(event) => {
-                event.preventDefault();
-                if (!saving()) {
-                    if (editing()) setEditing(false);
-                    else props.close();
-                }
-            }}
-            onPointerDown={(event) => {
-                const bounds = event.currentTarget.getBoundingClientRect();
-                if (
-                    !saving() &&
-                    (event.clientX < bounds.left ||
-                        event.clientX > bounds.right ||
-                        event.clientY < bounds.top ||
-                        event.clientY > bounds.bottom)
-                ) {
-                    if (editing()) setEditing(false);
-                    else props.close();
-                }
-            }}
+            onDismiss={dismiss}
         >
             <Show
                 when={editing()}
@@ -125,6 +125,7 @@ export function PhotoDialog(props: {
                                     aria-label={t("cropPhoto", {
                                         name: photoDisplayName(props.photo),
                                     })}
+                                    disabled={saving()}
                                     onClick={() => setEditing(true)}
                                 >
                                     <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -153,54 +154,47 @@ export function PhotoDialog(props: {
                             aria-busy={saving() ? "true" : "false"}
                         >
                             <span class="text-sm font-semibold">{t("linkedEmoji")}</span>
-                            <Show when={props.photo.emoji_status}>
-                                {(choice) => (
-                                    <EmojiMedia
-                                        url={props.api.emojiMediaUrl(
-                                            choice().document_id ?? choice().id,
-                                        )}
-                                        label={choice().label}
-                                        textColor={choice().text_color}
-                                    />
-                                )}
-                            </Show>
-                            <div class="ms-auto flex gap-2">
-                                <Show when={props.photo.emoji_status}>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={saving()}
-                                        aria-label={t("clearLinkedEmoji")}
-                                        onClick={() => void saveStatus(null)}
-                                    >
-                                        {t("clearPhotoEmoji")}
-                                    </Button>
+                            <button
+                                type="button"
+                                class={
+                                    props.photo.emoji_status
+                                        ? "size-12 flex items-center justify-center photo-icon-action rounded-lg border bg-[Canvas] p-0 shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                        : "emoji-add photo-icon-action"
+                                }
+                                disabled={saving() || !props.premium}
+                                aria-expanded={choosing() ? "true" : "false"}
+                                aria-controls="photo-emoji-browser"
+                                aria-label={
+                                    props.photo.emoji_status
+                                        ? t("changeLinkedEmoji")
+                                        : t("chooseLinkedEmoji")
+                                }
+                                ref={(element) => {
+                                    chooseButton = element;
+                                }}
+                                onClick={() =>
+                                    choosing() ? closeStatusPicker() : setChoosing(true)
+                                }
+                            >
+                                <Show
+                                    when={props.photo.emoji_status}
+                                    fallback={
+                                        <svg aria-hidden="true" viewBox="0 0 24 24">
+                                            <path d="M12 5v14M5 12h14" />
+                                        </svg>
+                                    }
+                                >
+                                    {(choice) => (
+                                        <EmojiMedia
+                                            url={props.api.emojiMediaUrl(
+                                                choice().document_id ?? choice().id,
+                                            )}
+                                            label={choice().label}
+                                            textColor={choice().text_color}
+                                        />
+                                    )}
                                 </Show>
-                                <Show when={props.premium}>
-                                    <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        disabled={saving()}
-                                        aria-expanded={choosing() ? "true" : "false"}
-                                        aria-controls="photo-emoji-browser"
-                                        aria-label={
-                                            props.photo.emoji_status
-                                                ? t("changeLinkedEmoji")
-                                                : t("chooseLinkedEmoji")
-                                        }
-                                        ref={(element) => {
-                                            chooseButton = element;
-                                        }}
-                                        onClick={() =>
-                                            choosing() ? closeStatusPicker() : setChoosing(true)
-                                        }
-                                    >
-                                        {props.photo.emoji_status
-                                            ? t("changePhotoEmoji")
-                                            : t("choosePhotoEmoji")}
-                                    </Button>
-                                </Show>
-                            </div>
+                            </button>
                         </div>
                         <Show when={!props.premium}>
                             <p class="mt-3 text-sm text-muted-foreground">
@@ -249,19 +243,37 @@ export function PhotoDialog(props: {
                         </Show>
                     </section>
                 </div>
-                <div class="mt-4 flex justify-end">
+                <Show when={props.premium}>
+                    <AppearanceEditor
+                        profile={props.profile}
+                        api={props.api}
+                        avatarUrl={props.api.selectedPhotoUrl(props.photo)}
+                        value={appearance.draft() ?? initialAppearance}
+                        change={appearance.edit}
+                        disabled={saving()}
+                    />
+                </Show>
+                <Show when={appearance.status() === "error"}>
+                    <p class="text-sm text-danger" role="alert">
+                        {t("requestFailed")}
+                    </p>
                     <Button
-                        variant="ghost"
+                        variant="secondary"
+                        onClick={() => void appearance.retry().catch(() => {})}
+                    >
+                        {t("appearanceRetry")}
+                    </Button>
+                </Show>
+                <div class="mt-4">
+                    <ModalCloseFooter
                         disabled={saving()}
                         ref={(element) => {
                             closeButton = element;
                         }}
-                        onClick={props.close}
-                    >
-                        {t("closePhotoSettings")}
-                    </Button>
+                        onDismiss={props.close}
+                    />
                 </div>
             </Show>
-        </dialog>
+        </Modal>
     );
 }

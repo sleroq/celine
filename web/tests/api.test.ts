@@ -103,6 +103,25 @@ describe("account-scoped requests", () => {
         ]);
     });
 
+    test("clears all photo appearances even if one write fails", async () => {
+        const fetch = spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(new Response(null, { status: 503 }))
+            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        await expect(accountApi("a/b").clearPhotoAppearances(["first", "second"])).rejects.toThrow(
+            "Request failed (503).",
+        );
+        expect(fetch.mock.calls.map(([url, options]) => [url, options?.body])).toEqual([
+            [
+                "/api/accounts/a%2Fb/photos/first/appearance",
+                JSON.stringify({ profile: null, name: null }),
+            ],
+            [
+                "/api/accounts/a%2Fb/photos/second/appearance",
+                JSON.stringify({ profile: null, name: null }),
+            ],
+        ]);
+    });
+
     test("keeps settings, login, and delayed work bound to the original account", async () => {
         const fetch = spyOn(globalThis, "fetch").mockResolvedValue(
             new Response(null, { status: 204 }),
@@ -268,4 +287,55 @@ test("formats second timestamps and expired countdowns", () => {
     expect(timeRemaining(165, 100)).toBe(`${minutes.format(1)} ${seconds.format(5)}`);
     expect(timeRemaining(120, 100.1)).toBe(seconds.format(20));
     expect(timeRemaining(90, 100)).toBe(seconds.format(0));
+});
+
+describe("appearance requests", () => {
+    afterEach(() => mock.restore());
+
+    test("preserves unchanged sections, explicit resets and eligible icons on account-scoped writes", async () => {
+        const fetch = spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(null, { status: 204 }),
+        );
+
+        const api = accountApi("personal");
+        const reset = { profile: null, name: { color: null, emoji: null } };
+        const custom = {
+            profile: {
+                color: 4,
+                emoji: { id: "9223372036854775806", label: "Star", source: "Background" },
+            },
+            name: null,
+        };
+
+        await api.request("appearance/apply", "PUT", reset);
+        await api.request("photos/photo%201/appearance", "PUT", custom);
+        await api.request("appearance/presets", "PUT", { presets: [reset, custom] });
+        const settings = {
+            enabled: false,
+            mode: "ordered" as const,
+            interval_secs: 60,
+            jitter_secs: null,
+        };
+        await api.request("appearance/settings", "PUT", settings);
+        for (const action of ["start", "stop", "apply"])
+            await api.request(`appearance/settings/${action}`, "POST");
+
+        expect(
+            fetch.mock.calls.map(([url, options]) => [url, options?.method, options?.body]),
+        ).toEqual([
+            ["/api/accounts/personal/appearance/apply", "PUT", JSON.stringify(reset)],
+            ["/api/accounts/personal/photos/photo%201/appearance", "PUT", JSON.stringify(custom)],
+            [
+                "/api/accounts/personal/appearance/presets",
+                "PUT",
+                JSON.stringify({ presets: [reset, custom] }),
+            ],
+            ["/api/accounts/personal/appearance/settings", "PUT", JSON.stringify(settings)],
+            ...["start", "stop", "apply"].map((action) => [
+                `/api/accounts/personal/appearance/settings/${action}`,
+                "POST",
+                undefined,
+            ]),
+        ]);
+    });
 });

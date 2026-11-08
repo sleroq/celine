@@ -1,7 +1,9 @@
+import { DefaultEmojiGlyph } from "./default-emoji";
 import { createEffect, createSignal, flush, For, onCleanup, onSettled, Show } from "solid-js";
 import Sortable from "sortablejs";
 import type { JSX } from "@solidjs/web";
 import { moveItem } from "./api";
+import { EmojiArtworkPreview } from "./EmojiArtworkPreview";
 import { EmojiMedia } from "./EmojiMedia";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui";
 import { t } from "./i18n";
@@ -19,6 +21,7 @@ const photoStatusIcons = {
 };
 
 type Item = {
+    defaultEmoji?: boolean;
     id: string;
     label: string;
     imageUrl?: string;
@@ -28,6 +31,7 @@ type Item = {
     textColor?: boolean;
     reorderLabel?: string;
     removeLabel?: string;
+    editLabel?: string;
     current?: boolean;
     statusUrl?: string;
     statusLabel?: string;
@@ -35,7 +39,8 @@ type Item = {
 };
 
 type Props = {
-    kind: "photo" | "emoji";
+    kind: "photo" | "emoji" | "appearance";
+    renderPreview?: (id: string) => JSX.Element;
     items: Item[];
     busy: boolean;
     mediaActive?: boolean;
@@ -56,9 +61,14 @@ export function SortableList(props: Props) {
     let list!: HTMLOListElement;
     let sortable: Sortable | undefined;
 
-    function move(from: number, to: number) {
+    function move(from: number, to: number, animate = true) {
         setPicked(undefined);
         if (from === to) return;
+        const elements =
+            animate && matchMedia("(prefers-reduced-motion: no-preference)").matches
+                ? Array.from(list.querySelectorAll<HTMLElement>(".sortable-item"))
+                : [];
+        const positions = elements.map((element) => element.getBoundingClientRect());
         setAnnouncement(
             t("reorderMoved", {
                 name: props.items[from].label,
@@ -67,6 +77,23 @@ export function SortableList(props: Props) {
             }),
         );
         props.reorder(moveItem(ids(), from, to));
+        if (elements.length) {
+            flush();
+            elements.forEach((element, index) => {
+                const next = element.getBoundingClientRect();
+                const x = positions[index].left - next.left;
+                const y = positions[index].top - next.top;
+                if (x || y) {
+                    element.animate(
+                        [
+                            { transform: `translate(${x}px, ${y}px)` },
+                            { transform: "translate(0, 0)" },
+                        ],
+                        { duration: 180, easing: "ease-out" },
+                    );
+                }
+            });
+        }
     }
 
     function choose(id: string) {
@@ -96,7 +123,7 @@ export function SortableList(props: Props) {
                 // Sortable moves DOM nodes itself. Restore the DOM before Solid applies the new order.
                 event.item.remove();
                 event.from.insertBefore(event.item, event.from.children[oldIndex] ?? null);
-                move(oldIndex, newIndex);
+                move(oldIndex, newIndex, false);
             },
         });
     });
@@ -125,7 +152,11 @@ export function SortableList(props: Props) {
             <ol
                 class={["sortable-list flex flex-wrap gap-3", `sortable-list-${props.kind}`]}
                 aria-label={
-                    props.kind === "photo" ? t("reorderPhotoOrder") : t("reorderEmojiOrder")
+                    props.kind === "appearance"
+                        ? t("appearancePresets")
+                        : props.kind === "photo"
+                          ? t("reorderPhotoOrder")
+                          : t("reorderEmojiOrder")
                 }
                 ref={(element) => {
                     list = element;
@@ -138,92 +169,134 @@ export function SortableList(props: Props) {
                         return (
                             <li
                                 class="sortable-item relative"
-                                onPointerMove={tilt}
+                                onPointerMove={(event) =>
+                                    tilt(event, props.kind === "appearance" ? 6 : 28)
+                                }
                                 onPointerLeave={resetTilt}
                                 onPointerCancel={resetTilt}
                             >
                                 <div class="sortable-surface relative">
-                                    <button
-                                        type="button"
-                                        class={[
-                                            "sortable-handle rounded-lg border bg-[Canvas] shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]",
-                                            props.kind === "emoji" && "photo-icon-action",
-                                            item().current && "border-accent! ring-2 ring-accent",
-                                        ]}
-                                        aria-label={
-                                            item().reorderLabel ??
-                                            (props.kind === "photo"
-                                                ? t("reorderPhoto", { name: item().label })
-                                                : t("reorderEmoji", { name: item().label }))
+                                    <EmojiArtworkPreview
+                                        enabled={
+                                            props.kind === "emoji" &&
+                                            !props.busy &&
+                                            props.mediaActive !== false
                                         }
-                                        aria-describedby={[
-                                            hintId(),
-                                            item().badge && `${props.kind}-badge-${id}`,
-                                            item().current && `${props.kind}-current-${id}`,
-                                        ]
-                                            .filter(Boolean)
-                                            .join(" ")}
-                                        aria-disabled={props.busy ? "true" : "false"}
-                                        aria-pressed={picked() === id ? "true" : "false"}
-                                        onClick={() => choose(id)}
-                                        onDblClick={(event) => {
-                                            if (!props.busy && props.preview) {
-                                                setPicked(undefined);
-                                                props.preview(id, event.currentTarget);
-                                            }
-                                        }}
-                                        onKeyDown={(event) => {
-                                            const direction =
-                                                event.key === "ArrowLeft" || event.key === "ArrowUp"
-                                                    ? -1
-                                                    : event.key === "ArrowRight" ||
-                                                        event.key === "ArrowDown"
-                                                      ? 1
-                                                      : 0;
-                                            if (!direction || props.busy) return;
-                                            event.preventDefault();
-                                            const target = index() + direction;
-                                            if (target < 0 || target >= props.items.length) return;
-                                            move(index(), target);
-                                            flush();
-                                            event.currentTarget.focus();
-                                        }}
+                                        url={item().mediaUrl}
+                                        label={item().label}
+                                        textColor={item().textColor}
                                     >
-                                        <Show
-                                            when={item().mediaUrl}
-                                            fallback={
+                                        {(ref) => (
+                                            <button
+                                                ref={ref}
+                                                type="button"
+                                                class={[
+                                                    "sortable-handle rounded-lg border bg-[Canvas] shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]",
+                                                    props.kind === "emoji" && "photo-icon-action",
+                                                    item().current &&
+                                                        "border-accent! ring-2 ring-accent",
+                                                ]}
+                                                aria-label={
+                                                    item().reorderLabel ??
+                                                    (props.kind === "photo"
+                                                        ? t("reorderPhoto", { name: item().label })
+                                                        : t("reorderEmoji", { name: item().label }))
+                                                }
+                                                aria-describedby={[
+                                                    hintId(),
+                                                    item().badge && `${props.kind}-badge-${id}`,
+                                                    item().current && `${props.kind}-current-${id}`,
+                                                ]
+                                                    .filter(Boolean)
+                                                    .join(" ")}
+                                                aria-disabled={props.busy ? "true" : "false"}
+                                                aria-pressed={picked() === id ? "true" : "false"}
+                                                onClick={() => choose(id)}
+                                                onDblClick={(event) => {
+                                                    if (!props.busy && props.preview) {
+                                                        setPicked(undefined);
+                                                        props.preview(id, event.currentTarget);
+                                                    }
+                                                }}
+                                                onKeyDown={(event) => {
+                                                    const direction =
+                                                        event.key === "ArrowLeft" ||
+                                                        event.key === "ArrowUp"
+                                                            ? -1
+                                                            : event.key === "ArrowRight" ||
+                                                                event.key === "ArrowDown"
+                                                              ? 1
+                                                              : 0;
+                                                    if (!direction || props.busy) return;
+                                                    event.preventDefault();
+                                                    const target = index() + direction;
+                                                    if (target < 0 || target >= props.items.length)
+                                                        return;
+                                                    move(index(), target);
+                                                    flush();
+                                                    event.currentTarget.focus();
+                                                }}
+                                            >
                                                 <Show
-                                                    when={item().imageUrl}
+                                                    when={props.renderPreview}
                                                     fallback={
-                                                        <span class="sortable-fallback max-w-full truncate text-sm">
-                                                            {item().label}
-                                                        </span>
+                                                        <Show
+                                                            when={item().mediaUrl}
+                                                            fallback={
+                                                                <Show
+                                                                    when={item().imageUrl}
+                                                                    fallback={
+                                                                        <Show
+                                                                            when={
+                                                                                item().defaultEmoji
+                                                                            }
+                                                                            fallback={
+                                                                                <span class="sortable-fallback max-w-full truncate text-sm">
+                                                                                    {item().label}
+                                                                                </span>
+                                                                            }
+                                                                        >
+                                                                            <DefaultEmojiGlyph />
+                                                                        </Show>
+                                                                    }
+                                                                >
+                                                                    {(url) => (
+                                                                        <img
+                                                                            src={url()}
+                                                                            alt=""
+                                                                            loading="lazy"
+                                                                            draggable="false"
+                                                                        />
+                                                                    )}
+                                                                </Show>
+                                                            }
+                                                        >
+                                                            {(url) => (
+                                                                <span aria-hidden="true">
+                                                                    <Show
+                                                                        when={
+                                                                            props.mediaActive !==
+                                                                            false
+                                                                        }
+                                                                    >
+                                                                        <EmojiMedia
+                                                                            url={url()}
+                                                                            label={item().label}
+                                                                            textColor={
+                                                                                item().textColor
+                                                                            }
+                                                                        />
+                                                                    </Show>
+                                                                </span>
+                                                            )}
+                                                        </Show>
                                                     }
                                                 >
-                                                    {(url) => (
-                                                        <img
-                                                            src={url()}
-                                                            alt=""
-                                                            loading="lazy"
-                                                            draggable="false"
-                                                        />
-                                                    )}
+                                                    {(render) => render()(id)}
                                                 </Show>
-                                            }
-                                        >
-                                            {(url) => (
-                                                <span aria-hidden="true">
-                                                    <Show when={props.mediaActive !== false}>
-                                                        <EmojiMedia
-                                                            url={url()}
-                                                            label={item().label}
-                                                            textColor={item().textColor}
-                                                        />
-                                                    </Show>
-                                                </span>
-                                            )}
-                                        </Show>
-                                    </button>
+                                            </button>
+                                        )}
+                                    </EmojiArtworkPreview>
                                     <Show when={item().current}>
                                         <span
                                             id={`${props.kind}-current-${id}`}
@@ -323,9 +396,12 @@ export function SortableList(props: Props) {
                                         <button
                                             type="button"
                                             class="sortable-edit photo-icon-action shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
-                                            aria-label={t("photoSettingsFor", {
-                                                name: item().label,
-                                            })}
+                                            aria-label={
+                                                item().editLabel ??
+                                                t("photoSettingsFor", {
+                                                    name: item().label,
+                                                })
+                                            }
                                             disabled={props.busy}
                                             onClick={(event) =>
                                                 props.edit?.(id, event.currentTarget)
