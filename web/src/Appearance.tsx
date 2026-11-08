@@ -452,7 +452,7 @@ function AppearancePreview(props: {
                             <img
                                 src={src()}
                                 alt=""
-                                draggable={false}
+                                draggable="false"
                                 onError={(event) => {
                                     event.currentTarget.style.display = "none";
                                 }}

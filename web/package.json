@@ -10,6 +10,7 @@
         "lint": "oxlint --deny-warnings && tw-lint \"src/**/*.{ts,tsx,css}\" --tailwind-config src/ui.css --max-warnings 0",
         "format": "oxfmt src tests scripts vite.config.ts",
         "format:check": "oxfmt --check src tests scripts vite.config.ts",
+        "build:preview": "bun run typecheck && bun scripts/vite.ts build --mode preview",
         "build": "bun run typecheck && bun scripts/vite.ts build",
         "test": "bun test tests"
     },

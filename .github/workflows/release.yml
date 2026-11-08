@@ -92,3 +92,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: gh release create "$TAG" release/* --verify-tag --generate-notes
+
+  preview:
+    name: Deploy preview
+    needs: release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/preview.yml

@@ -38,7 +38,7 @@ export function EmojiArtworkPreview(props: {
                     <Portal mount={target()}>
                         <div
                             aria-hidden="true"
-                            class="pointer-events-none fixed inset-0 z-[1000] grid place-items-center"
+                            class="pointer-events-none fixed inset-0 z-1000 grid place-items-center"
                         >
                             <div class="emoji-artwork-preview grid size-48 place-items-center rounded-3xl border border-border bg-surface/95 p-6 text-foreground shadow-lg">
                                 <EmojiMedia

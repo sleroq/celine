@@ -1,5 +1,5 @@
 import { render } from "@solidjs/web";
-import { createSignal } from "solid-js";
+import { createSignal, For } from "solid-js";
 import { EmojiArtworkPreview } from "../../../src/EmojiArtworkPreview";
 import { SortableList } from "../../../src/SortableList";
 import "../../../src/style.css";
@@ -13,22 +13,25 @@ function Fixture() {
     const [items, setItems] = createSignal(
         ["First", "Second"].map((id) => ({ id, label: id, mediaUrl: url })),
     );
+
     return (
         <>
-            <div style="display:flex;gap:20px;padding:40px">
-                {["First", "Second"].map((label) => (
-                    <EmojiArtworkPreview enabled url={url} label={label}>
-                        {(ref) => (
-                            <button
-                                ref={ref}
-                                style="width:100px;height:80px"
-                                onClick={() => setSelected(label)}
-                            >
-                                {label}
-                            </button>
-                        )}
-                    </EmojiArtworkPreview>
-                ))}
+            <div style={{ display: "flex", gap: "20px", padding: "40px" }}>
+                <For each={["First", "Second"]}>
+                    {(label) => (
+                        <EmojiArtworkPreview enabled url={url} label={label}>
+                            {(ref) => (
+                                <button
+                                    ref={ref}
+                                    style={{ width: "100px", height: "80px" }}
+                                    onClick={() => setSelected(label)}
+                                >
+                                    {label}
+                                </button>
+                            )}
+                        </EmojiArtworkPreview>
+                    )}
+                </For>
             </div>
             <p id="selection">{selected()}</p>
             <SortableList

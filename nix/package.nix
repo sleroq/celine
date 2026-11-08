@@ -31,7 +31,7 @@ let
     '';
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-N6Bq2XxESxsYUHJQWkUpbDr19afOY3eG8gzL/t0Mcr0=";
+    outputHash = "sha256-8rbdZRaN6rTjFEvfggQv9lh08SDe7/d7VUlOYvjv26c=";
   };
 in
 rustPlatform.buildRustPackage {

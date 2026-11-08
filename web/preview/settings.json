@@ -1,0 +1,5 @@
+{
+    "settings": { "enabled": false, "mode": "ordered", "interval_secs": 3600, "jitter_secs": null },
+    "emoji_settings": { "enabled": false, "mode": "ordered", "interval_secs": 3600, "jitter_secs": null },
+    "appearance_settings": { "enabled": false, "mode": "ordered", "interval_secs": 3600, "jitter_secs": null }
+}
