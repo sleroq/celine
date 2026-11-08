@@ -13,6 +13,7 @@ Check out [Demo](https://celine.cum.army)
 - Rotation for profile pictures
 - Rotation for statuss
 - Rotation for profile / message style
+- Multiple accounts
 - Link status / style to the profile picture to rotate it together, allowing for matching status / style
 - Edit / crop pictures
 - Change order or rotate randomly
