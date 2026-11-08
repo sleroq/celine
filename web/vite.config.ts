@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
-import { parsePreviewSettings } from "./src/preview-runtime";
-import { defineConfig } from "vite";
+import { cp } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { defineConfig, type Plugin } from "vite";
 import solid from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -8,16 +9,6 @@ const apiTarget = "http://127.0.0.1:7766";
 
 export default defineConfig(({ mode }) => ({
     base: mode === "preview" ? "./" : "/",
-    define:
-        mode === "preview"
-            ? {
-                  __PREVIEW_SETTINGS__: JSON.stringify(
-                      parsePreviewSettings(
-                          readFileSync(new URL("./preview/settings.json", import.meta.url), "utf8"),
-                      ),
-                  ),
-              }
-            : {},
     optimizeDeps: { exclude: ["tlottie"] },
     plugins: [
         tailwindcss(),
@@ -26,6 +17,13 @@ export default defineConfig(({ mode }) => ({
             ? [
                   {
                       name: "preview-entry",
+                      writeBundle(options) {
+                          return cp(
+                              fileURLToPath(new URL("./preview-data", import.meta.url)),
+                              resolve(options.dir!, "preview-data"),
+                              { recursive: true },
+                          );
+                      },
                       transformIndexHtml: {
                           order: "pre" as const,
                           handler(html: string) {
@@ -34,7 +32,7 @@ export default defineConfig(({ mode }) => ({
                                   .replace('<script src="/favicon.js"></script>', "");
                           },
                       },
-                  },
+                  } satisfies Plugin,
               ]
             : []),
     ],

@@ -1,0 +1,1802 @@
+{
+  "accounts": [
+    {
+      "state": {
+        "active_account_id": "preview-1",
+        "accounts": [],
+        "auth": {
+          "status": "authorized",
+          "name": "ьaәk",
+          "premium": false
+        },
+        "profile": {
+          "name": "ьaәk",
+          "premium": false,
+          "updated_at": 0,
+          "photo_url": "preview-data/preview-1-6ce496280cba889b4df1.jpg",
+          "appearance": {
+            "profile": {
+              "color": null,
+              "emoji": null
+            },
+            "name": {
+              "color": null,
+              "emoji": null
+            }
+          },
+          "emoji": null
+        },
+        "photos": [
+          {
+            "id": "photo-1",
+            "name": "Telegram photo",
+            "generated_name": true,
+            "telegram_id": null,
+            "history_checked": true,
+            "crop": null,
+            "emoji_status": null,
+            "appearance": {
+              "profile": null,
+              "name": null
+            }
+          }
+        ],
+        "photo_cache": {
+          "status": "ready",
+          "photos": [],
+          "recovery": {}
+        },
+        "settings": {
+          "enabled": false,
+          "mode": "ordered",
+          "interval_secs": 3600,
+          "jitter_secs": null
+        },
+        "emoji_settings": {
+          "enabled": false,
+          "mode": "ordered",
+          "interval_secs": 3600,
+          "jitter_secs": null
+        },
+        "appearance_settings": {
+          "enabled": false,
+          "mode": "ordered",
+          "interval_secs": 3600,
+          "jitter_secs": null
+        },
+        "applied_settings": null,
+        "applied_emoji_settings": null,
+        "applied_appearance_settings": null,
+        "appearance_presets": [],
+        "selected_emoji_ids": [],
+        "selected_emojis": [],
+        "current_photo_id": null,
+        "next_rotation_at": null,
+        "next_emoji_rotation_at": null,
+        "next_appearance_rotation_at": null,
+        "last_error": null
+      },
+      "media": {
+        "photos/photo-1": "preview-data/preview-1-afbbc7ee46cc1b8135ba.jpg"
+      },
+      "emojis": {
+        "choices": [],
+        "sets": [],
+        "premium": false
+      },
+      "catalog": {
+        "profile_colors": [
+          {
+            "id": 5,
+            "colors": [
+              4888278
+            ],
+            "dark_colors": [
+              3375297
+            ],
+            "bg_colors": [
+              5935035
+            ],
+            "dark_bg_colors": [
+              4682132
+            ]
+          },
+          {
+            "id": 3,
+            "colors": [
+              5485111
+            ],
+            "dark_colors": [
+              3972130
+            ],
+            "bg_colors": [
+              4825941
+            ],
+            "dark_bg_colors": [
+              3371323
+            ]
+          },
+          {
+            "id": 1,
+            "colors": [
+              14386489
+            ],
+            "dark_colors": [
+              12807972
+            ],
+            "bg_colors": [
+              12745790
+            ],
+            "dark_bg_colors": [
+              9723436
+            ]
+          },
+          {
+            "id": 0,
+            "colors": [
+              13722204
+            ],
+            "dark_colors": [
+              12209223
+            ],
+            "bg_colors": [
+              12211792
+            ],
+            "dark_bg_colors": [
+              10241344
+            ]
+          },
+          {
+            "id": 2,
+            "colors": [
+              10513887
+            ],
+            "dark_colors": [
+              9000906
+            ],
+            "bg_colors": [
+              9792200
+            ],
+            "dark_bg_colors": [
+              7426201
+            ]
+          },
+          {
+            "id": 4,
+            "colors": [
+              4565185
+            ],
+            "dark_colors": [
+              3646897
+            ],
+            "bg_colors": [
+              4102061
+            ],
+            "dark_bg_colors": [
+              3702407
+            ]
+          },
+          {
+            "id": 6,
+            "colors": [
+              13460119
+            ],
+            "dark_colors": [
+              11947138
+            ],
+            "bg_colors": [
+              12079992
+            ],
+            "dark_bg_colors": [
+              9717603
+            ]
+          },
+          {
+            "id": 7,
+            "colors": [
+              9477803
+            ],
+            "dark_colors": [
+              7964822
+            ],
+            "bg_colors": [
+              8358805
+            ],
+            "dark_bg_colors": [
+              4412001
+            ]
+          },
+          {
+            "id": 13,
+            "colors": [
+              3574481,
+              8246256
+            ],
+            "dark_colors": [
+              5148620,
+              7525869
+            ],
+            "bg_colors": [
+              5475266,
+              5089469
+            ],
+            "dark_bg_colors": [
+              3694988,
+              4557729
+            ]
+          },
+          {
+            "id": 11,
+            "colors": [
+              2599184,
+              11000919
+            ],
+            "dark_colors": [
+              4036437,
+              10932055
+            ],
+            "bg_colors": [
+              4036437,
+              9021008
+            ],
+            "dark_bg_colors": [
+              2714179,
+              6262596
+            ]
+          },
+          {
+            "id": 9,
+            "colors": [
+              14712875,
+              15842348
+            ],
+            "dark_colors": [
+              13595204,
+              15247677
+            ],
+            "bg_colors": [
+              13595204,
+              13407283
+            ],
+            "dark_bg_colors": [
+              9393455,
+              10580530
+            ]
+          },
+          {
+            "id": 8,
+            "colors": [
+              14966882,
+              16363107
+            ],
+            "dark_colors": [
+              13194845,
+              16486759
+            ],
+            "bg_colors": [
+              13194845,
+              14253143
+            ],
+            "dark_bg_colors": [
+              10044227,
+              11294782
+            ]
+          },
+          {
+            "id": 10,
+            "colors": [
+              10510323,
+              16027647
+            ],
+            "dark_colors": [
+              9855700,
+              15236580
+            ],
+            "bg_colors": [
+              9855700,
+              12150454
+            ],
+            "dark_bg_colors": [
+              6506129,
+              9588898
+            ]
+          },
+          {
+            "id": 12,
+            "colors": [
+              2600142,
+              9234906
+            ],
+            "dark_colors": [
+              3774400,
+              7986629
+            ],
+            "bg_colors": [
+              4036026,
+              5287320
+            ],
+            "dark_bg_colors": [
+              3173500,
+              4102270
+            ]
+          },
+          {
+            "id": 14,
+            "colors": [
+              13715826,
+              16760479
+            ],
+            "dark_colors": [
+              12865666,
+              15830166
+            ],
+            "bg_colors": [
+              11554676,
+              13723245
+            ],
+            "dark_bg_colors": [
+              8929632,
+              10900057
+            ]
+          },
+          {
+            "id": 15,
+            "colors": [
+              7108740,
+              11384769
+            ],
+            "dark_colors": [
+              7108740,
+              11384769
+            ],
+            "bg_colors": [
+              6517890,
+              8096407
+            ],
+            "dark_bg_colors": [
+              5464174,
+              3688020
+            ]
+          }
+        ],
+        "name_colors": [
+          {
+            "id": 5,
+            "colors": [
+              3574481
+            ],
+            "dark_colors": [
+              6073834
+            ]
+          },
+          {
+            "id": 3,
+            "colors": [
+              4237600
+            ],
+            "dark_colors": [
+              8245361
+            ]
+          },
+          {
+            "id": 1,
+            "colors": [
+              14055202
+            ],
+            "dark_colors": [
+              15248218
+            ]
+          },
+          {
+            "id": 0,
+            "colors": [
+              13389897
+            ],
+            "dark_colors": [
+              15239288
+            ]
+          },
+          {
+            "id": 2,
+            "colors": [
+              9788635
+            ],
+            "dark_colors": [
+              9211370
+            ]
+          },
+          {
+            "id": 4,
+            "colors": [
+              3186362
+            ],
+            "dark_colors": [
+              5491910
+            ]
+          },
+          {
+            "id": 6,
+            "colors": [
+              13062283
+            ],
+            "dark_colors": [
+              15234202
+            ]
+          },
+          {
+            "id": 12,
+            "colors": [
+              3379668,
+              8246256
+            ],
+            "dark_colors": [
+              5423103,
+              742548
+            ]
+          },
+          {
+            "id": 10,
+            "colors": [
+              2599184,
+              11000919
+            ],
+            "dark_colors": [
+              11004782,
+              1474093
+            ]
+          },
+          {
+            "id": 8,
+            "colors": [
+              14712875,
+              16434484
+            ],
+            "dark_colors": [
+              15511630,
+              12801812
+            ]
+          },
+          {
+            "id": 7,
+            "colors": [
+              14766162,
+              16363107
+            ],
+            "dark_colors": [
+              16749440,
+              10039095
+            ]
+          },
+          {
+            "id": 9,
+            "colors": [
+              10510323,
+              16027647
+            ],
+            "dark_colors": [
+              13015039,
+              6173128
+            ]
+          },
+          {
+            "id": 11,
+            "colors": [
+              2600142,
+              8579286
+            ],
+            "dark_colors": [
+              4249808,
+              285823
+            ]
+          },
+          {
+            "id": 13,
+            "colors": [
+              14500721,
+              16760479
+            ],
+            "dark_colors": [
+              16746150,
+              9320046
+            ]
+          },
+          {
+            "id": 14,
+            "colors": [
+              2391021,
+              15747158,
+              16777215
+            ],
+            "dark_colors": [
+              4170494,
+              15024719,
+              16777215
+            ]
+          },
+          {
+            "id": 15,
+            "colors": [
+              14055202,
+              2007057,
+              16777215
+            ],
+            "dark_colors": [
+              16748638,
+              3319079,
+              16777215
+            ]
+          },
+          {
+            "id": 16,
+            "colors": [
+              1547842,
+              15223359,
+              16777215
+            ],
+            "dark_colors": [
+              6738788,
+              13976655,
+              16777215
+            ]
+          },
+          {
+            "id": 17,
+            "colors": [
+              2659503,
+              7324758,
+              16777215
+            ],
+            "dark_colors": [
+              2276578,
+              4039232,
+              16777215
+            ]
+          },
+          {
+            "id": 18,
+            "colors": [
+              826035,
+              16756117,
+              16770741
+            ],
+            "dark_colors": [
+              2276578,
+              16750456,
+              16767595
+            ]
+          },
+          {
+            "id": 19,
+            "colors": [
+              7821270,
+              16225808,
+              16768654
+            ],
+            "dark_colors": [
+              9933311,
+              15889181,
+              16767833
+            ]
+          },
+          {
+            "id": 20,
+            "colors": [
+              1410511,
+              15903517,
+              16777215
+            ],
+            "dark_colors": [
+              4040427,
+              15639837,
+              16777215
+            ]
+          }
+        ],
+        "choices": [],
+        "sets": []
+      }
+    },
+    {
+      "state": {
+        "active_account_id": "preview-2",
+        "accounts": [],
+        "auth": {
+          "status": "authorized",
+          "name": "sl",
+          "premium": true
+        },
+        "profile": {
+          "name": "sl",
+          "premium": true,
+          "updated_at": 0,
+          "photo_url": "preview-data/preview-2-6ce496280cba889b4df1.jpg",
+          "appearance": {
+            "profile": {
+              "color": 0,
+              "emoji": null
+            },
+            "name": {
+              "color": 7,
+              "emoji": null
+            }
+          },
+          "emoji": {
+            "id": "5438159763378549365",
+            "label": "🍩",
+            "format": "image",
+            "text_color": false,
+            "media_url": "preview-data/preview-2-d4ca99c8108d8155eb88.webp"
+          }
+        },
+        "photos": [
+          {
+            "id": "photo-1",
+            "name": "mpv-shot0009.jpg",
+            "generated_name": false,
+            "telegram_id": null,
+            "history_checked": true,
+            "crop": null,
+            "emoji_status": {
+              "id": "5265145153412161917",
+              "label": "👾",
+              "source": "Recent",
+              "source_kind": "recent",
+              "text_color": false,
+              "thumbnail_url": "preview-data/preview-2-63e0d8442beb6a716dd9.webm"
+            },
+            "appearance": {
+              "profile": {
+                "color": 10,
+                "emoji": null
+              },
+              "name": {
+                "color": 9,
+                "emoji": null
+              }
+            }
+          },
+          {
+            "id": "photo-2",
+            "name": "Telegram photo",
+            "generated_name": true,
+            "telegram_id": null,
+            "history_checked": true,
+            "crop": null,
+            "emoji_status": {
+              "id": "5953877785352081116",
+              "label": "🍩",
+              "source": "Recent",
+              "source_kind": "recent",
+              "text_color": false,
+              "thumbnail_url": "preview-data/preview-2-1bf25f0f2e669517c5ec.webm"
+            },
+            "appearance": {
+              "profile": {
+                "color": 8,
+                "emoji": null
+              },
+              "name": {
+                "color": 0,
+                "emoji": null
+              }
+            }
+          },
+          {
+            "id": "photo-3",
+            "name": "mpv-shot0068.jpg",
+            "generated_name": false,
+            "telegram_id": null,
+            "history_checked": true,
+            "crop": null,
+            "emoji_status": {
+              "id": "5471986071103348916",
+              "label": "😗",
+              "source": "Recent",
+              "source_kind": "recent",
+              "text_color": false,
+              "thumbnail_url": "preview-data/preview-2-4eed3dcaef0da1cd9baf.webp"
+            },
+            "appearance": {
+              "profile": {
+                "color": 6,
+                "emoji": null
+              },
+              "name": {
+                "color": 13,
+                "emoji": null
+              }
+            }
+          },
+          {
+            "id": "photo-4",
+            "name": "Telegram photo",
+            "generated_name": true,
+            "telegram_id": null,
+            "history_checked": true,
+            "crop": null,
+            "emoji_status": {
+              "id": "collectible:5906518117281956513",
+              "label": "Sakura Flower #61048 (SakuraFlower-61048)",
+              "source": "Collectible",
+              "source_kind": "collectible",
+              "document_id": "5303182586376384478",
+              "text_color": false,
+              "thumbnail_url": "preview-data/preview-2-87e78ec7f0c9f249a5bf.tgs"
+            },
+            "appearance": {
+              "profile": {
+                "color": 15,
+                "emoji": null
+              },
+              "name": {
+                "color": 20,
+                "emoji": null
+              }
+            }
+          },
+          {
+            "id": "photo-5",
+            "name": "mpv-shot0059.jpg",
+            "generated_name": false,
+            "telegram_id": null,
+            "history_checked": true,
+            "crop": null,
+            "emoji_status": {
+              "id": "5438159763378549365",
+              "label": "🍩",
+              "source": "Recent",
+              "source_kind": "recent",
+              "text_color": false,
+              "thumbnail_url": "preview-data/preview-2-d4ca99c8108d8155eb88.webp"
+            },
+            "appearance": {
+              "profile": {
+                "color": 0,
+                "emoji": null
+              },
+              "name": {
+                "color": 7,
+                "emoji": null
+              }
+            }
+          },
+          {
+            "id": "photo-6",
+            "name": "Telegram photo",
+            "generated_name": true,
+            "telegram_id": null,
+            "history_checked": true,
+            "crop": null,
+            "emoji_status": {
+              "id": "5429604721100866255",
+              "label": "🍩",
+              "source": "Recent",
+              "source_kind": "recent",
+              "text_color": false,
+              "thumbnail_url": "preview-data/preview-2-a74f555bb6ebbd27349b.webp"
+            },
+            "appearance": {
+              "profile": null,
+              "name": {
+                "color": 2,
+                "emoji": null
+              }
+            }
+          },
+          {
+            "id": "photo-7",
+            "name": "kek.png",
+            "generated_name": false,
+            "telegram_id": null,
+            "history_checked": true,
+            "crop": null,
+            "emoji_status": {
+              "id": "5471986071103348916",
+              "label": "😗",
+              "source": "Recent",
+              "source_kind": "recent",
+              "text_color": false,
+              "thumbnail_url": "preview-data/preview-2-4eed3dcaef0da1cd9baf.webp"
+            },
+            "appearance": {
+              "profile": null,
+              "name": {
+                "color": 9,
+                "emoji": null
+              }
+            }
+          }
+        ],
+        "photo_cache": {
+          "status": "ready",
+          "photos": [],
+          "recovery": {}
+        },
+        "settings": {
+          "enabled": true,
+          "mode": "random",
+          "interval_secs": 900,
+          "jitter_secs": null
+        },
+        "emoji_settings": {
+          "enabled": false,
+          "mode": "random",
+          "interval_secs": 600,
+          "jitter_secs": null
+        },
+        "appearance_settings": {
+          "enabled": false,
+          "mode": "random",
+          "interval_secs": 3600,
+          "jitter_secs": null
+        },
+        "applied_settings": {
+          "enabled": true,
+          "mode": "random",
+          "interval_secs": 900,
+          "jitter_secs": null
+        },
+        "applied_emoji_settings": null,
+        "applied_appearance_settings": null,
+        "appearance_presets": [
+          {
+            "profile": {
+              "color": 15,
+              "emoji": null
+            },
+            "name": {
+              "color": 9,
+              "emoji": {
+                "id": "5386844821270836777",
+                "label": "Background",
+                "source": "Current",
+                "source_kind": null,
+                "text_color": true,
+                "thumbnail_url": "preview-data/preview-2-a178e1c7a5ad705c1c2d.tgs"
+              }
+            }
+          },
+          {
+            "profile": {
+              "color": 5,
+              "emoji": null
+            },
+            "name": {
+              "color": 11,
+              "emoji": {
+                "id": "5301072507598550489",
+                "label": "👻",
+                "source": "Background",
+                "source_kind": "pack",
+                "text_color": true,
+                "thumbnail_url": "preview-data/preview-2-f4cd0036adce07bbcd45.tgs"
+              }
+            }
+          },
+          {
+            "profile": {
+              "color": 6,
+              "emoji": null
+            },
+            "name": {
+              "color": 9,
+              "emoji": {
+                "id": "5386844821270836777",
+                "label": "Background",
+                "source": "Current",
+                "source_kind": null,
+                "text_color": true,
+                "thumbnail_url": "preview-data/preview-2-a178e1c7a5ad705c1c2d.tgs"
+              }
+            }
+          }
+        ],
+        "selected_emoji_ids": [
+          "5195413863985594800",
+          "5267177905598767720",
+          "5438159763378549365",
+          "5368829052666787617",
+          "5953877785352081116",
+          "5305781990778230815",
+          "5265145153412161917",
+          "5397776346262819651",
+          "5471986071103348916",
+          "5188340104388692911",
+          "5242721081915101689",
+          "5388597077733291368",
+          "5429604721100866255",
+          "collectible:5906518117281956513"
+        ],
+        "selected_emojis": [
+          {
+            "id": "5195413863985594800",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-763203934e0f73a7921d.webp"
+          },
+          {
+            "id": "5267177905598767720",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-9d813ee2b938a6c8982b.webp"
+          },
+          {
+            "id": "5438159763378549365",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-d4ca99c8108d8155eb88.webp"
+          },
+          {
+            "id": "5368829052666787617",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-302825492a125e862b88.webp"
+          },
+          {
+            "id": "5953877785352081116",
+            "label": "🍩",
+            "source": "Search",
+            "source_kind": "search",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-1bf25f0f2e669517c5ec.webm"
+          },
+          {
+            "id": "5305781990778230815",
+            "label": "🌟",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-39c041045dfd2b777a1b.webp"
+          },
+          {
+            "id": "5265145153412161917",
+            "label": "👾",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-63e0d8442beb6a716dd9.webm"
+          },
+          {
+            "id": "5397776346262819651",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-a6d3ae40d4f0a564ec52.webp"
+          },
+          {
+            "id": "5471986071103348916",
+            "label": "😗",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-4eed3dcaef0da1cd9baf.webp"
+          },
+          {
+            "id": "5188340104388692911",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-513a1a3e13a42c89a3cf.webp"
+          },
+          {
+            "id": "5242721081915101689",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-79bec8677ad068556649.webp"
+          },
+          {
+            "id": "5388597077733291368",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-0128a1a25e9b09256d6a.tgs"
+          },
+          {
+            "id": "5429604721100866255",
+            "label": "🍩",
+            "source": "Search",
+            "source_kind": "search",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-a74f555bb6ebbd27349b.webp"
+          },
+          {
+            "id": "collectible:5906518117281956513",
+            "label": "Sakura Flower #61048 (SakuraFlower-61048)",
+            "source": "Collectible",
+            "source_kind": "collectible",
+            "document_id": "5303182586376384478",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-87e78ec7f0c9f249a5bf.tgs"
+          }
+        ],
+        "current_photo_id": "photo-5",
+        "next_rotation_at": null,
+        "next_emoji_rotation_at": null,
+        "next_appearance_rotation_at": null,
+        "last_error": null
+      },
+      "media": {
+        "photos/photo-1": "preview-data/preview-2-85685a7f8b2f8eb7e791.jpg",
+        "emojis/5265145153412161917/media": "preview-data/preview-2-63e0d8442beb6a716dd9.webm",
+        "photos/photo-2": "preview-data/preview-2-b774b24eb0440fb1a4f3.jpg",
+        "emojis/5953877785352081116/media": "preview-data/preview-2-1bf25f0f2e669517c5ec.webm",
+        "photos/photo-3": "preview-data/preview-2-5ba0b84ed5465e1c9563.jpg",
+        "emojis/5471986071103348916/media": "preview-data/preview-2-4eed3dcaef0da1cd9baf.webp",
+        "photos/photo-4": "preview-data/preview-2-a15fa9e02de25cabec12.jpg",
+        "emojis/5303182586376384478/media": "preview-data/preview-2-87e78ec7f0c9f249a5bf.tgs",
+        "photos/photo-5": "preview-data/preview-2-52acfed49db93b718cfe.jpg",
+        "emojis/5438159763378549365/media": "preview-data/preview-2-d4ca99c8108d8155eb88.webp",
+        "photos/photo-6": "preview-data/preview-2-11689d1b2fa0d5bc5246.jpg",
+        "emojis/5429604721100866255/media": "preview-data/preview-2-a74f555bb6ebbd27349b.webp",
+        "photos/photo-7": "preview-data/preview-2-ca1925def7cf9aa56594.jpg",
+        "emojis/5386844821270836777/media": "preview-data/preview-2-a178e1c7a5ad705c1c2d.tgs",
+        "emojis/5301072507598550489/media": "preview-data/preview-2-f4cd0036adce07bbcd45.tgs",
+        "emojis/5368829052666787617/media": "preview-data/preview-2-302825492a125e862b88.webp",
+        "emojis/5195413863985594800/media": "preview-data/preview-2-763203934e0f73a7921d.webp",
+        "emojis/5267177905598767720/media": "preview-data/preview-2-9d813ee2b938a6c8982b.webp",
+        "emojis/5305781990778230815/media": "preview-data/preview-2-39c041045dfd2b777a1b.webp",
+        "emojis/5388597077733291368/media": "preview-data/preview-2-0128a1a25e9b09256d6a.tgs",
+        "emojis/5188340104388692911/media": "preview-data/preview-2-513a1a3e13a42c89a3cf.webp",
+        "emojis/5242721081915101689/media": "preview-data/preview-2-79bec8677ad068556649.webp",
+        "emojis/5397776346262819651/media": "preview-data/preview-2-a6d3ae40d4f0a564ec52.webp"
+      },
+      "emojis": {
+        "choices": [
+          {
+            "id": "5195413863985594800",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-763203934e0f73a7921d.webp"
+          },
+          {
+            "id": "5267177905598767720",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-9d813ee2b938a6c8982b.webp"
+          },
+          {
+            "id": "5438159763378549365",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-d4ca99c8108d8155eb88.webp"
+          },
+          {
+            "id": "5368829052666787617",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-302825492a125e862b88.webp"
+          },
+          {
+            "id": "5953877785352081116",
+            "label": "🍩",
+            "source": "Search",
+            "source_kind": "search",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-1bf25f0f2e669517c5ec.webm"
+          },
+          {
+            "id": "5305781990778230815",
+            "label": "🌟",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-39c041045dfd2b777a1b.webp"
+          },
+          {
+            "id": "5265145153412161917",
+            "label": "👾",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-63e0d8442beb6a716dd9.webm"
+          },
+          {
+            "id": "5397776346262819651",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-a6d3ae40d4f0a564ec52.webp"
+          },
+          {
+            "id": "5471986071103348916",
+            "label": "😗",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-4eed3dcaef0da1cd9baf.webp"
+          },
+          {
+            "id": "5188340104388692911",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-513a1a3e13a42c89a3cf.webp"
+          },
+          {
+            "id": "5242721081915101689",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-79bec8677ad068556649.webp"
+          },
+          {
+            "id": "5388597077733291368",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-0128a1a25e9b09256d6a.tgs"
+          },
+          {
+            "id": "5429604721100866255",
+            "label": "🍩",
+            "source": "Search",
+            "source_kind": "search",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-a74f555bb6ebbd27349b.webp"
+          },
+          {
+            "id": "collectible:5906518117281956513",
+            "label": "Sakura Flower #61048 (SakuraFlower-61048)",
+            "source": "Collectible",
+            "source_kind": "collectible",
+            "document_id": "5303182586376384478",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-87e78ec7f0c9f249a5bf.tgs"
+          }
+        ],
+        "sets": [],
+        "premium": true
+      },
+      "catalog": {
+        "profile_colors": [
+          {
+            "id": 5,
+            "colors": [
+              4888278
+            ],
+            "dark_colors": [
+              3375297
+            ],
+            "bg_colors": [
+              5935035
+            ],
+            "dark_bg_colors": [
+              4682132
+            ]
+          },
+          {
+            "id": 3,
+            "colors": [
+              5485111
+            ],
+            "dark_colors": [
+              3972130
+            ],
+            "bg_colors": [
+              4825941
+            ],
+            "dark_bg_colors": [
+              3371323
+            ]
+          },
+          {
+            "id": 1,
+            "colors": [
+              14386489
+            ],
+            "dark_colors": [
+              12807972
+            ],
+            "bg_colors": [
+              12745790
+            ],
+            "dark_bg_colors": [
+              9723436
+            ]
+          },
+          {
+            "id": 0,
+            "colors": [
+              13722204
+            ],
+            "dark_colors": [
+              12209223
+            ],
+            "bg_colors": [
+              12211792
+            ],
+            "dark_bg_colors": [
+              10241344
+            ]
+          },
+          {
+            "id": 2,
+            "colors": [
+              10513887
+            ],
+            "dark_colors": [
+              9000906
+            ],
+            "bg_colors": [
+              9792200
+            ],
+            "dark_bg_colors": [
+              7426201
+            ]
+          },
+          {
+            "id": 4,
+            "colors": [
+              4565185
+            ],
+            "dark_colors": [
+              3646897
+            ],
+            "bg_colors": [
+              4102061
+            ],
+            "dark_bg_colors": [
+              3702407
+            ]
+          },
+          {
+            "id": 6,
+            "colors": [
+              13460119
+            ],
+            "dark_colors": [
+              11947138
+            ],
+            "bg_colors": [
+              12079992
+            ],
+            "dark_bg_colors": [
+              9717603
+            ]
+          },
+          {
+            "id": 7,
+            "colors": [
+              9477803
+            ],
+            "dark_colors": [
+              7964822
+            ],
+            "bg_colors": [
+              8358805
+            ],
+            "dark_bg_colors": [
+              4412001
+            ]
+          },
+          {
+            "id": 13,
+            "colors": [
+              3574481,
+              8246256
+            ],
+            "dark_colors": [
+              5148620,
+              7525869
+            ],
+            "bg_colors": [
+              5475266,
+              5089469
+            ],
+            "dark_bg_colors": [
+              3694988,
+              4557729
+            ]
+          },
+          {
+            "id": 11,
+            "colors": [
+              2599184,
+              11000919
+            ],
+            "dark_colors": [
+              4036437,
+              10932055
+            ],
+            "bg_colors": [
+              4036437,
+              9021008
+            ],
+            "dark_bg_colors": [
+              2714179,
+              6262596
+            ]
+          },
+          {
+            "id": 9,
+            "colors": [
+              14712875,
+              15842348
+            ],
+            "dark_colors": [
+              13595204,
+              15247677
+            ],
+            "bg_colors": [
+              13595204,
+              13407283
+            ],
+            "dark_bg_colors": [
+              9393455,
+              10580530
+            ]
+          },
+          {
+            "id": 8,
+            "colors": [
+              14966882,
+              16363107
+            ],
+            "dark_colors": [
+              13194845,
+              16486759
+            ],
+            "bg_colors": [
+              13194845,
+              14253143
+            ],
+            "dark_bg_colors": [
+              10044227,
+              11294782
+            ]
+          },
+          {
+            "id": 10,
+            "colors": [
+              10510323,
+              16027647
+            ],
+            "dark_colors": [
+              9855700,
+              15236580
+            ],
+            "bg_colors": [
+              9855700,
+              12150454
+            ],
+            "dark_bg_colors": [
+              6506129,
+              9588898
+            ]
+          },
+          {
+            "id": 12,
+            "colors": [
+              2600142,
+              9234906
+            ],
+            "dark_colors": [
+              3774400,
+              7986629
+            ],
+            "bg_colors": [
+              4036026,
+              5287320
+            ],
+            "dark_bg_colors": [
+              3173500,
+              4102270
+            ]
+          },
+          {
+            "id": 14,
+            "colors": [
+              13715826,
+              16760479
+            ],
+            "dark_colors": [
+              12865666,
+              15830166
+            ],
+            "bg_colors": [
+              11554676,
+              13723245
+            ],
+            "dark_bg_colors": [
+              8929632,
+              10900057
+            ]
+          },
+          {
+            "id": 15,
+            "colors": [
+              7108740,
+              11384769
+            ],
+            "dark_colors": [
+              7108740,
+              11384769
+            ],
+            "bg_colors": [
+              6517890,
+              8096407
+            ],
+            "dark_bg_colors": [
+              5464174,
+              3688020
+            ]
+          }
+        ],
+        "name_colors": [
+          {
+            "id": 5,
+            "colors": [
+              3574481
+            ],
+            "dark_colors": [
+              6073834
+            ]
+          },
+          {
+            "id": 3,
+            "colors": [
+              4237600
+            ],
+            "dark_colors": [
+              8245361
+            ]
+          },
+          {
+            "id": 1,
+            "colors": [
+              14055202
+            ],
+            "dark_colors": [
+              15248218
+            ]
+          },
+          {
+            "id": 0,
+            "colors": [
+              13389897
+            ],
+            "dark_colors": [
+              15239288
+            ]
+          },
+          {
+            "id": 2,
+            "colors": [
+              9788635
+            ],
+            "dark_colors": [
+              9211370
+            ]
+          },
+          {
+            "id": 4,
+            "colors": [
+              3186362
+            ],
+            "dark_colors": [
+              5491910
+            ]
+          },
+          {
+            "id": 6,
+            "colors": [
+              13062283
+            ],
+            "dark_colors": [
+              15234202
+            ]
+          },
+          {
+            "id": 12,
+            "colors": [
+              3379668,
+              8246256
+            ],
+            "dark_colors": [
+              5423103,
+              742548
+            ]
+          },
+          {
+            "id": 10,
+            "colors": [
+              2599184,
+              11000919
+            ],
+            "dark_colors": [
+              11004782,
+              1474093
+            ]
+          },
+          {
+            "id": 8,
+            "colors": [
+              14712875,
+              16434484
+            ],
+            "dark_colors": [
+              15511630,
+              12801812
+            ]
+          },
+          {
+            "id": 7,
+            "colors": [
+              14766162,
+              16363107
+            ],
+            "dark_colors": [
+              16749440,
+              10039095
+            ]
+          },
+          {
+            "id": 9,
+            "colors": [
+              10510323,
+              16027647
+            ],
+            "dark_colors": [
+              13015039,
+              6173128
+            ]
+          },
+          {
+            "id": 11,
+            "colors": [
+              2600142,
+              8579286
+            ],
+            "dark_colors": [
+              4249808,
+              285823
+            ]
+          },
+          {
+            "id": 13,
+            "colors": [
+              14500721,
+              16760479
+            ],
+            "dark_colors": [
+              16746150,
+              9320046
+            ]
+          },
+          {
+            "id": 14,
+            "colors": [
+              2391021,
+              15747158,
+              16777215
+            ],
+            "dark_colors": [
+              4170494,
+              15024719,
+              16777215
+            ]
+          },
+          {
+            "id": 15,
+            "colors": [
+              14055202,
+              2007057,
+              16777215
+            ],
+            "dark_colors": [
+              16748638,
+              3319079,
+              16777215
+            ]
+          },
+          {
+            "id": 16,
+            "colors": [
+              1547842,
+              15223359,
+              16777215
+            ],
+            "dark_colors": [
+              6738788,
+              13976655,
+              16777215
+            ]
+          },
+          {
+            "id": 17,
+            "colors": [
+              2659503,
+              7324758,
+              16777215
+            ],
+            "dark_colors": [
+              2276578,
+              4039232,
+              16777215
+            ]
+          },
+          {
+            "id": 18,
+            "colors": [
+              826035,
+              16756117,
+              16770741
+            ],
+            "dark_colors": [
+              2276578,
+              16750456,
+              16767595
+            ]
+          },
+          {
+            "id": 19,
+            "colors": [
+              7821270,
+              16225808,
+              16768654
+            ],
+            "dark_colors": [
+              9933311,
+              15889181,
+              16767833
+            ]
+          },
+          {
+            "id": 20,
+            "colors": [
+              1410511,
+              15903517,
+              16777215
+            ],
+            "dark_colors": [
+              4040427,
+              15639837,
+              16777215
+            ]
+          }
+        ],
+        "choices": [
+          {
+            "id": "5195413863985594800",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-763203934e0f73a7921d.webp"
+          },
+          {
+            "id": "5267177905598767720",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-9d813ee2b938a6c8982b.webp"
+          },
+          {
+            "id": "5438159763378549365",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-d4ca99c8108d8155eb88.webp"
+          },
+          {
+            "id": "5368829052666787617",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-302825492a125e862b88.webp"
+          },
+          {
+            "id": "5953877785352081116",
+            "label": "🍩",
+            "source": "Search",
+            "source_kind": "search",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-1bf25f0f2e669517c5ec.webm"
+          },
+          {
+            "id": "5305781990778230815",
+            "label": "🌟",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-39c041045dfd2b777a1b.webp"
+          },
+          {
+            "id": "5265145153412161917",
+            "label": "👾",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-63e0d8442beb6a716dd9.webm"
+          },
+          {
+            "id": "5397776346262819651",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-a6d3ae40d4f0a564ec52.webp"
+          },
+          {
+            "id": "5471986071103348916",
+            "label": "😗",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-4eed3dcaef0da1cd9baf.webp"
+          },
+          {
+            "id": "5188340104388692911",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-513a1a3e13a42c89a3cf.webp"
+          },
+          {
+            "id": "5242721081915101689",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-79bec8677ad068556649.webp"
+          },
+          {
+            "id": "5388597077733291368",
+            "label": "🍩",
+            "source": "Recent",
+            "source_kind": "recent",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-0128a1a25e9b09256d6a.tgs"
+          },
+          {
+            "id": "5429604721100866255",
+            "label": "🍩",
+            "source": "Search",
+            "source_kind": "search",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-a74f555bb6ebbd27349b.webp"
+          },
+          {
+            "id": "collectible:5906518117281956513",
+            "label": "Sakura Flower #61048 (SakuraFlower-61048)",
+            "source": "Collectible",
+            "source_kind": "collectible",
+            "document_id": "5303182586376384478",
+            "text_color": false,
+            "thumbnail_url": "preview-data/preview-2-87e78ec7f0c9f249a5bf.tgs"
+          }
+        ],
+        "sets": []
+      }
+    }
+  ]
+}

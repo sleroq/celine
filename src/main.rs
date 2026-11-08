@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
         eprintln!("Celine could not initialize file logging: {error:#}");
     }
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "Celine starting");
-    let credentials = Credentials::embedded();
+    let credentials = Credentials::load()?;
     if credentials.is_none() {
         tracing::warn!("Telegram API credentials are not configured");
         eprintln!(

@@ -80,20 +80,42 @@ pub fn now() -> u64 {
         .as_secs()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Credentials {
     pub id: i32,
-    pub hash: &'static str,
+    pub hash: String,
 }
 impl Credentials {
-    pub fn embedded() -> Option<Self> {
-        let id = option_env!("CELINE_API_ID")?
-            .parse::<i32>()
-            .ok()
-            .filter(|id| *id > 0)?;
-        let hash = option_env!("CELINE_API_HASH")?;
-        (hash.len() == 32 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
-            .then_some(Self { id, hash })
+    pub fn load() -> Result<Option<Self>> {
+        Self::from_sources(
+            (
+                std::env::var_os("CELINE_API_ID"),
+                std::env::var_os("CELINE_API_HASH"),
+            ),
+            (option_env!("CELINE_API_ID"), option_env!("CELINE_API_HASH")),
+        )
+    }
+
+    fn from_sources(
+        runtime: (Option<std::ffi::OsString>, Option<std::ffi::OsString>),
+        embedded: (Option<&str>, Option<&str>),
+    ) -> Result<Option<Self>> {
+        match runtime {
+            (None, None) => Ok(Self::parse(embedded.0, embedded.1)),
+            (Some(id), Some(hash)) => Self::parse(id.to_str(), hash.to_str())
+                .map(Some)
+                .context("Invalid runtime CELINE_API_ID or CELINE_API_HASH"),
+            _ => bail!("CELINE_API_ID and CELINE_API_HASH must both be set"),
+        }
+    }
+
+    fn parse(id: Option<&str>, hash: Option<&str>) -> Option<Self> {
+        let id = id?.parse::<i32>().ok().filter(|id| *id > 0)?;
+        let hash = hash?;
+        (hash.len() == 32 && hash.bytes().all(|c| c.is_ascii_hexdigit())).then(|| Self {
+            id,
+            hash: hash.to_owned(),
+        })
     }
 }
 
@@ -202,9 +224,9 @@ impl App {
         let mut connection = self.connection().await?;
         if let Some(telegram) = connection.as_mut() {
             telegram.logout().await?;
-        } else if let Some(credentials) = self.credentials {
+        } else if let Some(credentials) = self.credentials.as_ref() {
             let mut telegram =
-                Telegram::connect(&self.dir, credentials.id, credentials.hash).await?;
+                Telegram::connect(&self.dir, credentials.id, &credentials.hash).await?;
             telegram.logout().await?;
         }
         if self.credentials.is_none() && self.dir.join("grammers/session.sqlite").exists() {
@@ -964,7 +986,7 @@ impl App {
         }
     }
     pub async fn run(self: Arc<Self>) {
-        let Some(credentials) = self.credentials else {
+        let Some(credentials) = self.credentials.as_ref() else {
             return;
         };
         let mut retry_at = 0;
@@ -1005,14 +1027,14 @@ impl App {
     }
     async fn tick(
         &self,
-        credentials: Credentials,
+        credentials: &Credentials,
         photo_cache_sync: &mut PhotoCacheSync,
         photo_cache_retry_at: &mut u64,
     ) -> Result<(), TelegramError> {
         let mut connection = self.connection().await?;
         if connection.is_none() {
             *connection =
-                Some(Telegram::connect(&self.dir, credentials.id, credentials.hash).await?);
+                Some(Telegram::connect(&self.dir, credentials.id, &credentials.hash).await?);
         }
         let telegram = connection.as_mut().expect("connection was initialized");
         let auth = telegram.poll_auth().await?;
@@ -1671,6 +1693,81 @@ fn emoji_rotation_due(library: &Library, now: u64) -> bool {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    const API_HASH: &str = "0123456789abcdefABCDEF0123456789";
+
+    #[test]
+    fn credentials_runtime_pair_takes_precedence() {
+        let credentials = Credentials::from_sources(
+            (Some("42".into()), Some(API_HASH.into())),
+            (Some("7"), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(credentials.id, 42);
+        assert_eq!(credentials.hash, API_HASH);
+    }
+
+    #[test]
+    fn credentials_fall_back_only_when_runtime_pair_is_absent() {
+        let credentials =
+            Credentials::from_sources((None, None), (Some("2147483647"), Some(API_HASH)))
+                .unwrap()
+                .unwrap();
+        assert_eq!(credentials.id, i32::MAX);
+        assert_eq!(credentials.hash, API_HASH);
+        assert!(
+            Credentials::from_sources((None, None), (None, None))
+                .unwrap()
+                .is_none()
+        );
+        for runtime in [(Some("42".into()), None), (None, Some(API_HASH.into()))] {
+            assert!(Credentials::from_sources(runtime, (Some("7"), Some(API_HASH))).is_err());
+        }
+    }
+
+    #[test]
+    fn credentials_validate_both_sources() {
+        for (id, hash) in [
+            ("", API_HASH),
+            ("0", API_HASH),
+            ("-1", API_HASH),
+            ("2147483648", API_HASH),
+            ("abc", API_HASH),
+            (" 42", API_HASH),
+            ("42", ""),
+            ("42", "0123456789abcdef"),
+            ("42", "gggggggggggggggggggggggggggggggg"),
+            ("42", "éééééééééééééééé"),
+        ] {
+            assert!(Credentials::parse(Some(id), Some(hash)).is_none());
+            assert!(
+                Credentials::from_sources(
+                    (Some(id.into()), Some(hash.into())),
+                    (Some("7"), Some(API_HASH)),
+                )
+                .is_err()
+            );
+            assert!(
+                Credentials::from_sources((None, None), (Some(id), Some(hash)))
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credentials_reject_non_unicode_runtime_values() {
+        use std::os::unix::ffi::OsStringExt;
+        let invalid = std::ffi::OsString::from_vec(vec![0xff]);
+        for runtime in [
+            (Some(invalid.clone()), Some(API_HASH.into())),
+            (Some("42".into()), Some(invalid)),
+        ] {
+            assert!(Credentials::from_sources(runtime, (Some("7"), Some(API_HASH))).is_err());
+        }
+    }
 
     enum PhotoCall {
         Current(Option<(&'static str, Vec<u8>)>),

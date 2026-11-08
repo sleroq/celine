@@ -77,7 +77,7 @@ impl Accounts {
             if id != "legacy" && uuid::Uuid::parse_str(id).is_err() {
                 bail!("Invalid account id in registry");
             }
-            let app = App::open(dir.join("accounts").join(id), credentials)?;
+            let app = App::open(dir.join("accounts").join(id), credentials.clone())?;
             let worker = spawn_worker(id, &app);
             accounts.insert(id.clone(), Account { app, worker });
         }
@@ -141,7 +141,10 @@ impl Accounts {
     }
     fn add(&self, inner: &mut Inner) -> Result<()> {
         let id = uuid::Uuid::new_v4().to_string();
-        let app = App::open(self.dir.join("accounts").join(&id), self.credentials)?;
+        let app = App::open(
+            self.dir.join("accounts").join(&id),
+            self.credentials.clone(),
+        )?;
         let mut registry = Registry {
             active_account_id: id.clone(),
             accounts: inner.registry.accounts.clone(),
@@ -186,7 +189,10 @@ impl Accounts {
         };
         let replacement = if registry.accounts.is_empty() {
             let id = uuid::Uuid::new_v4().to_string();
-            let app = App::open(self.dir.join("accounts").join(&id), self.credentials)?;
+            let app = App::open(
+                self.dir.join("accounts").join(&id),
+                self.credentials.clone(),
+            )?;
             registry.accounts.push(id.clone());
             Some((id, app))
         } else {

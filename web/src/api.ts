@@ -1,3 +1,7 @@
+declare global {
+    var __previewMedia: ((account: string, path: string) => string) | undefined;
+}
+
 import { locale, serverMessage, t } from "./i18n";
 import type { MessageInfo } from "./i18n";
 
@@ -128,10 +132,16 @@ export function accountApi(id: string) {
     const base = `/api/${path}/`;
 
     function photoUrl(photoId: string) {
-        return `${base}photos/${encodeURIComponent(photoId)}`;
+        return (
+            globalThis.__previewMedia?.(id, `photos/${photoId}`) ??
+            `${base}photos/${encodeURIComponent(photoId)}`
+        );
     }
     function photoHistoryUrl(telegramId: string) {
-        return `${base}photos/history/${encodeURIComponent(telegramId)}`;
+        return (
+            globalThis.__previewMedia?.(id, `photos/history/${telegramId}`) ??
+            `${base}photos/history/${encodeURIComponent(telegramId)}`
+        );
     }
     function savePhotoEmoji(id: string, choice: string | null) {
         return createRequest(base)(`photos/${encodeURIComponent(id)}/emoji-status`, "PUT", {
@@ -144,7 +154,8 @@ export function accountApi(id: string) {
         photoHistoryUrl,
         selectedPhotoUrl: (photo: Pick<Photo, "id" | "crop">) =>
             `${photoUrl(photo.id)}?crop=${encodeURIComponent(JSON.stringify(photo.crop ?? null))}`,
-        originalPhotoUrl: (id: string) => `${photoUrl(id)}/original`,
+        originalPhotoUrl: (photoId: string) =>
+            globalThis.__previewMedia?.(id, `photos/${photoId}`) ?? `${photoUrl(photoId)}/original`,
         reuploadPhoto: (id: string) =>
             createRequest(base)(`photos/${encodeURIComponent(id)}/reupload`, "POST"),
         savePhotoEmoji,
@@ -180,6 +191,7 @@ export function accountApi(id: string) {
         saveCrop: (id: string, crop: Crop | null) =>
             createRequest(base)(`photos/${encodeURIComponent(id)}/crop`, "PUT", { crop }),
         emojiMediaUrl: (documentId: string) =>
+            globalThis.__previewMedia?.(id, `emojis/${documentId}/media`) ??
             `${base}emojis/${encodeURIComponent(documentId)}/media`,
         activate: () => request(`${path}/active`, "PUT"),
         logout: () => request(path, "DELETE"),

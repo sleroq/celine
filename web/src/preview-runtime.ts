@@ -1,4 +1,4 @@
-import type { Appearance, Settings, State } from "./api";
+import type { Appearance, AppearanceCatalog, Crop, Emojis, Settings, State } from "./api";
 
 export type PreviewSettings = Pick<State, "settings" | "emoji_settings" | "appearance_settings">;
 
@@ -35,33 +35,39 @@ export function parsePreviewSettings(raw: string): PreviewSettings {
     };
 }
 
+export type PreviewSnapshot = {
+    accounts: {
+        state: State;
+        media: Record<string, string>;
+        emojis: Emojis;
+        catalog: AppearanceCatalog;
+    }[];
+};
+
+export function previewMediaUrl(
+    snapshot: PreviewSnapshot,
+    account: string,
+    path: string,
+    base: string,
+): string {
+    const asset = snapshot.accounts.find((a) => a.state.active_account_id === account)?.media[path];
+    return asset ? new URL(asset, base).href : "";
+}
+
 export function createPreviewFetch(
-    settings: PreviewSettings,
+    snapshot: PreviewSnapshot,
     fallback: Window["fetch"],
 ): Window["fetch"] {
-    const profile = { name: "Demo account", premium: true, updated_at: 0 };
-    const auth = { status: "authorized" as const, name: "Demo account", premium: true };
-    const state: State = {
-        ...structuredClone(settings),
-        active_account_id: "preview",
-        accounts: [{ id: "preview", pending: false, auth, profile }],
-        auth,
-        profile,
-        photos: [],
-        photo_cache: { status: "ready", photos: [], recovery: {} },
-        appearance_presets: [],
-        applied_settings: null,
-        applied_emoji_settings: null,
-        applied_appearance_settings: null,
-        next_rotation_at: null,
-        next_emoji_rotation_at: null,
-        next_appearance_rotation_at: null,
-        selected_emoji_ids: [],
-        selected_emojis: [],
-        current_photo_id: null,
-        last_error: null,
-    };
-
+    const accounts = structuredClone(snapshot.accounts);
+    let activeId = accounts[0]!.state.active_account_id;
+    function summaries() {
+        return accounts.map(({ state }) => ({
+            id: state.active_account_id,
+            pending: false,
+            auth: state.auth,
+            profile: state.profile,
+        }));
+    }
     const schedules = {
         settings: ["settings", "applied_settings"],
         "emojis/settings": ["emoji_settings", "applied_emoji_settings"],
@@ -73,29 +79,39 @@ export function createPreviewFetch(
         if (!/(^|\/)api(?:\/|$)/.test(url.pathname)) return fallback(input, init);
 
         const request = new Request(url, input instanceof Request ? input : init);
-        const path = url.pathname.split(/\/api\/?/)[1]?.replace(/^accounts\/preview\//, "") ?? "";
+        const route = url.pathname.split(/\/api\/?/)[1] ?? "";
+        const scoped = /^accounts\/([^/]+)\/(.*)$/.exec(route);
+        const account = accounts.find(
+            (a) =>
+                a.state.active_account_id === (scoped ? decodeURIComponent(scoped[1]!) : activeId),
+        );
+        if (!account) return Response.json({ error: "Unknown preview account" }, { status: 404 });
+        const state = account.state;
+        const path = scoped ? scoped[2] : route;
         const method = request.method;
 
         if (method === "GET") {
-            if (path === "state") return Response.json(state);
-            if (path === "emojis") return Response.json({ choices: [], sets: [], premium: true });
-            if (path === "appearance/catalog")
+            if (path === "state")
                 return Response.json({
-                    profile_colors: [],
-                    name_colors: [],
-                    choices: [],
-                    sets: [],
+                    ...state,
+                    active_account_id: activeId,
+                    accounts: summaries(),
                 });
+            if (path === "emojis") return Response.json(account.emojis);
+            if (path === "appearance/catalog") return Response.json(account.catalog);
             if (path === "emojis/search") return Response.json({ choices: [], next_offset: null });
             if (path.startsWith("emojis/sets/")) return Response.json({ choices: [] });
+        }
+
+        if (scoped && path === "active" && method === "PUT") {
+            activeId = state.active_account_id;
+            return new Response(null, { status: 204 });
         }
 
         for (const [endpoint, [key, applied]] of Object.entries(schedules)) {
             if (path === endpoint && method === "PUT") {
                 const value = await request.json();
-                state[key] = parsePreviewSettings(JSON.stringify({ ...settings, [key]: value }))[
-                    key
-                ];
+                state[key] = parsePreviewSettings(JSON.stringify({ ...state, [key]: value }))[key];
                 return new Response(null, { status: 204 });
             }
             if (path.startsWith(`${endpoint}/`) && method === "POST") {
@@ -109,6 +125,32 @@ export function createPreviewFetch(
             }
         }
 
+        if (path === "photos/order" && method === "POST") {
+            // SAFETY: the typed UI submits these IDs to this in-memory-only endpoint.
+            const body = (await request.json()) as { ids: string[] };
+            state.photos.sort((a, b) => body.ids.indexOf(a.id) - body.ids.indexOf(b.id));
+            return new Response(null, { status: 204 });
+        }
+        const photoRoute = /^photos\/([^/]+)\/(crop|emoji-status|appearance)$/.exec(path ?? "");
+        const photo =
+            photoRoute && state.photos.find((p) => p.id === decodeURIComponent(photoRoute[1]!));
+        if (photo && photoRoute && method === "PUT") {
+            const body = await request.json();
+            if (photoRoute[2] === "crop") {
+                // SAFETY: the typed crop editor supplies this in-memory-only request.
+                const crop = body as { crop: Crop | null };
+                photo.crop = crop.crop;
+            }
+            if (photoRoute[2] === "appearance") {
+                // SAFETY: the typed appearance editor supplies this in-memory-only request.
+                const appearance = body as Appearance;
+                photo.appearance = appearance;
+            }
+            if (photoRoute[2] === "emoji-status")
+                photo.emoji_status = account.emojis.choices.find((e) => e.id === body.id) ?? null;
+            return new Response(null, { status: 204 });
+        }
+
         if (path === "appearance/presets" && method === "PUT") {
             // SAFETY: only the typed local appearance editor submits this in-memory request.
             const body = (await request.json()) as { presets: Appearance[] };
@@ -116,7 +158,14 @@ export function createPreviewFetch(
             return new Response(null, { status: 204 });
         }
         if (path === "emojis" && method === "PUT") {
-            state.selected_emoji_ids = [];
+            // SAFETY: the typed UI submits these IDs to this in-memory-only endpoint.
+            const body = (await request.json()) as { ids: string[] };
+            state.selected_emoji_ids = body.ids.filter((id) =>
+                account.emojis.choices.some((e) => e.id === id),
+            );
+            state.selected_emojis = account.emojis.choices.filter((e) =>
+                state.selected_emoji_ids.includes(e.id),
+            );
             return new Response(null, { status: 204 });
         }
         if (path === "photos/history/refresh" && method === "POST")
@@ -124,7 +173,7 @@ export function createPreviewFetch(
 
         // In particular, account/auth/upload actions must never fall through to the network.
         return Response.json(
-            { error: "This action is unavailable in the static demo." },
+            { error: "This action is unavailable in the public snapshot." },
             { status: 400 },
         );
     };
