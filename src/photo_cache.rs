@@ -10,6 +10,7 @@ use anyhow::{Context, Result, ensure};
 
 use crate::photo_match::Fingerprint;
 
+#[derive(Clone)]
 pub struct PhotoCache {
     directory: PathBuf,
     history: Option<Vec<String>>,
@@ -63,9 +64,11 @@ impl PhotoCache {
     }
 
     pub fn available(&self) -> Vec<String> {
-        self.photos()
-            .into_iter()
-            .filter(|id| self.cached.contains_key(id))
+        self.history
+            .iter()
+            .flatten()
+            .filter(|id| self.cached.contains_key(*id))
+            .cloned()
             .collect()
     }
 
@@ -77,7 +80,9 @@ impl PhotoCache {
     }
 
     pub fn complete(&self) -> bool {
-        self.history.is_some() && self.missing().is_empty()
+        self.history
+            .as_ref()
+            .is_some_and(|ids| ids.iter().all(|id| self.cached.contains_key(id)))
     }
 
     pub fn set_history(&mut self, ids: Vec<String>) -> Result<()> {
@@ -93,14 +98,15 @@ impl PhotoCache {
     }
 
     pub fn missing(&self) -> Vec<String> {
-        self.photos()
-            .into_iter()
-            .filter(|id| !self.cached.contains_key(id))
+        self.history
+            .iter()
+            .flatten()
+            .filter(|id| !self.cached.contains_key(*id))
+            .cloned()
             .collect()
     }
 
     pub fn store(&mut self, id: &str, bytes: &[u8]) -> Result<()> {
-        validate_id(id)?;
         ensure!(
             self.history
                 .as_ref()
@@ -114,7 +120,6 @@ impl PhotoCache {
     }
 
     pub fn remember(&mut self, id: &str, bytes: &[u8]) -> Result<()> {
-        validate_id(id)?;
         let mut ids = self.photos();
         ids.retain(|item| item != id);
         ids.insert(0, id.to_owned());
@@ -132,11 +137,18 @@ impl PhotoCache {
         jpeg: &[u8],
         available: impl Fn(&str) -> bool,
     ) -> Result<Option<String>> {
-        Ok(self.matches(jpeg)?.into_iter().find(|id| available(id)))
+        let fingerprint = Fingerprint::decode(jpeg)?;
+        Ok(self
+            .matching_fingerprint(&fingerprint)
+            .find(|id| available(id))
+            .cloned())
     }
 
     pub fn matches(&self, jpeg: &[u8]) -> Result<Vec<String>> {
-        Ok(self.matching_fingerprint(&Fingerprint::decode(jpeg)?))
+        Ok(self
+            .matching_fingerprint(&Fingerprint::decode(jpeg)?)
+            .cloned()
+            .collect())
     }
 
     // Old cached images remain usable even when their ID leaves the history.
@@ -145,20 +157,18 @@ impl PhotoCache {
         let fingerprint = self.cached.get(id)?;
         self.image_path(id)
             .is_file()
-            .then(|| self.matching_fingerprint(fingerprint))
+            .then(|| self.matching_fingerprint(fingerprint).cloned().collect())
     }
 
-    fn matching_fingerprint(&self, candidate: &Fingerprint) -> Vec<String> {
-        self.history
-            .iter()
-            .flatten()
-            .filter(|id| {
-                self.cached
-                    .get(*id)
-                    .is_some_and(|photo| candidate.is_close(photo))
-            })
-            .cloned()
-            .collect()
+    fn matching_fingerprint<'a>(
+        &'a self,
+        candidate: &'a Fingerprint,
+    ) -> impl Iterator<Item = &'a String> {
+        self.history.iter().flatten().filter(|id| {
+            self.cached
+                .get(*id)
+                .is_some_and(|photo| candidate.is_close(photo))
+        })
     }
 
     fn image_path(&self, id: &str) -> PathBuf {
@@ -280,6 +290,12 @@ mod tests {
         for id in ["../escape", "01", "+1", "9223372036854775808"] {
             assert!(cache.store(id, &bytes).is_err());
             assert!(cache.set_history(vec![id.into()]).is_err());
+            assert!(cache.remember(id, &bytes).is_err());
+            assert_eq!(cache.photos(), ["1", "-2"]);
+            assert_eq!(
+                PhotoCache::open(account.path()).unwrap().photos(),
+                ["1", "-2"]
+            );
         }
         assert!(cache.store("3", &bytes).is_err());
         assert!(cache.matching(b"broken", |_| true).is_err());

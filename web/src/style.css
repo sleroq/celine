@@ -946,6 +946,10 @@ input[type="number"] {
         width: 44px;
         height: 44px;
     }
+    .sortable-edit svg {
+        width: 26px;
+        height: 26px;
+    }
 }
 .crop-dialog {
     width: min(36rem, calc(100vw - 2rem));

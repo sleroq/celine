@@ -1,6 +1,7 @@
 //! Conservative near-duplicate detection, not proof of image identity.
 use image::{DynamicImage, imageops::FilterType};
 
+#[derive(Clone)]
 pub struct Fingerprint {
     hash: u64,
     colors: Vec<u8>,

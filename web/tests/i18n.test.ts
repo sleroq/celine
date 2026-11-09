@@ -53,14 +53,14 @@ describe("translation catalogs", () => {
         }
     });
 
-    test("cover message codes declared by the backend", () => {
+    test("translate literal backend message codes", () => {
         const source = new URL("../../src/", import.meta.url);
         const files = new Bun.Glob("**/*.rs").scanSync({ cwd: fileURLToPath(source) });
         const codes = new Set<string>();
         for (const file of files) {
             const content = readFileSync(new URL(file, source), "utf8");
             for (const match of content.matchAll(
-                /\b(?:Message|MessageInfo)::new\(\s*"([a-z_]+\.[a-z_]+)"/g,
+                /\b(?:Message::new|MessageInfo::(?:new|parameter)|TelegramError::message|Self::message)\(\s*"([a-z_]+\.[a-z_]+)"/g,
             )) {
                 codes.add(match[1]);
             }
@@ -85,6 +85,12 @@ describe("translation catalogs", () => {
         expect(
             translateServerMessage("uk", { code: "telegram.password_incorrect", params: {} }),
         ).toBe("Неправильний пароль двоетапної перевірки Telegram.");
+        expect(
+            translateServerMessage("uk", { code: "validation.appearance_emoji", params: {} }),
+        ).toBe("Виберіть відповідний емодзі для фону.");
+        expect(
+            translateServerMessage("ru", { code: "telegram.appearance_update_failed", params: {} }),
+        ).toBe("Telegram не обновил оформление.");
         expect(translateServerMessage("en", { code: "future.unknown", params: {} })).toBe(
             serverMessages.en["error.unclassified"],
         );

@@ -4,7 +4,7 @@
 use crate::messages::MessageInfo;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt,
     path::Path,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -388,7 +388,6 @@ pub struct Telegram {
     sets: HashMap<i64, tl::types::StickerSet>,
     thumbnails: HashMap<i64, Thumbnail>,
     documents: HashMap<i64, tl::types::Document>,
-    background_emojis: HashSet<i64>,
     profile: Option<Profile>,
     profile_photo: Option<DownloadFile>,
     profile_refresh_due: bool,
@@ -421,7 +420,6 @@ impl Telegram {
             sets: HashMap::new(),
             thumbnails: HashMap::new(),
             documents: HashMap::new(),
-            background_emojis: HashSet::new(),
             profile: None,
             profile_photo: None,
             profile_refresh_due: false,
@@ -446,7 +444,7 @@ impl Telegram {
         if (self.profile.is_some() || self.connection.was_authorized())
             && let Err(error) = self
                 .connection
-                .client()
+                .available_client()?
                 .invoke(&tl::functions::auth::LogOut {})
                 .await
         {
@@ -745,6 +743,7 @@ impl Telegram {
         &mut self,
         appearance: &crate::library::Appearance,
     ) -> Result<(), TelegramError> {
+        Self::validate_appearance(appearance)?;
         self.require_available()?;
         self.require_authorized()?;
         self.verify_identity().await?;
@@ -754,7 +753,6 @@ impl Telegram {
                 "Telegram Premium is required for appearance changes.",
             ));
         }
-        self.validate_appearance(appearance).await?;
         for (for_profile, value) in [(true, &appearance.profile), (false, &appearance.name)] {
             let Some(value) = value else {
                 continue;
@@ -768,6 +766,8 @@ impl Telegram {
                     background_emoji_id,
                 }))
             };
+            self.require_available()?;
+            self.require_authorized()?;
             let updated = self
                 .connection
                 .client()
@@ -784,37 +784,14 @@ impl Telegram {
         }
         Ok(())
     }
-    pub async fn validate_appearance(
-        &mut self,
+    pub fn validate_appearance(
         appearance: &crate::library::Appearance,
     ) -> Result<(), TelegramError> {
-        let ids = [&appearance.profile, &appearance.name]
+        for value in [&appearance.profile, &appearance.name]
             .into_iter()
             .flatten()
-            .map(appearance_emoji_id)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-        if ids.iter().any(|id| !self.background_emojis.contains(id)) {
-            self.appearance_catalog().await?;
-            if ids.iter().any(|id| !self.background_emojis.contains(id)) {
-                let sets = self
-                    .sets
-                    .values()
-                    .filter(|set| set.text_color)
-                    .map(|set| set.id)
-                    .collect::<Vec<_>>();
-                for id in sets {
-                    self.emoji_set(id).await?;
-                }
-            }
-        }
-        if ids.iter().any(|id| !self.background_emojis.contains(id)) {
-            return Err(TelegramError::message(
-                "validation.appearance_emoji",
-                "Choose an emoji from the background catalog or an eligible installed pack.",
-            ));
+        {
+            appearance_emoji_id(value)?;
         }
         Ok(())
     }
@@ -844,7 +821,6 @@ impl Telegram {
             tl::enums::EmojiList::List(list) => list.document_id,
             tl::enums::EmojiList::NotModified => Vec::new(),
         };
-        self.background_emojis.extend(ids.iter().copied());
         for chunk in ids.chunks(100) {
             let documents = self
                 .connection
@@ -1123,12 +1099,7 @@ impl Telegram {
             )
         })?;
         let title = set.title.clone();
-        let eligible = set.text_color;
         let documents = self.emoji_set_documents(id).await?;
-        if eligible {
-            self.background_emojis
-                .extend(documents.iter().map(|document| document.id));
-        }
         Ok(documents
             .into_iter()
             .map(|document| self.emoji_choice(document, &title))
@@ -1241,6 +1212,7 @@ impl Telegram {
                 "No image thumbnail is available for this emoji.",
             )
         })?;
+        let downloaded = matches!(thumbnail, Thumbnail::Remote(_));
         let bytes = match thumbnail {
             Thumbnail::Cached(bytes) => bytes,
             Thumbnail::Remote(thumbnail) => self.download(&thumbnail).await?,
@@ -1251,7 +1223,9 @@ impl Telegram {
                 "This emoji thumbnail is not a supported image.",
             )
         })?;
-        self.thumbnails.insert(id, Thumbnail::Cached(bytes.clone()));
+        if downloaded {
+            self.thumbnails.insert(id, Thumbnail::Cached(bytes.clone()));
+        }
         Ok((bytes, content_type))
     }
 
@@ -1850,11 +1824,10 @@ fn current_appearance(
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn appearance_validation_uses_provenance_and_prepares_both_sections() {
+    async fn appearance_validation_checks_both_sections_without_catalog() {
         let (_dir, mut telegram) = offline_telegram().await;
         let mut choice = telegram.emoji_choice(emoji_document(123, "image/webp"), "Background");
         choice.text_color = false;
-        telegram.background_emojis.insert(123);
         let mut appearance = crate::library::Appearance {
             profile: Some(crate::library::AppearanceValue {
                 color: None,
@@ -1862,16 +1835,14 @@ mod tests {
             }),
             name: None,
         };
-        telegram.validate_appearance(&appearance).await.unwrap();
+        Telegram::validate_appearance(&appearance).unwrap();
         choice.id = "not-an-id".into();
         appearance.name = Some(crate::library::AppearanceValue {
             color: None,
             emoji: Some(choice),
         });
         assert_eq!(
-            telegram
-                .validate_appearance(&appearance)
-                .await
+            Telegram::validate_appearance(&appearance)
                 .unwrap_err()
                 .info
                 .code,
@@ -2357,7 +2328,7 @@ mod tests {
         )
     }
 
-    async fn offline_telegram() -> (tempfile::TempDir, Telegram) {
+    pub(super) async fn offline_telegram() -> (tempfile::TempDir, Telegram) {
         let dir = tempfile::tempdir().unwrap();
         let connection = Connection::open(dir.path(), 1, "unused").await.unwrap();
         let telegram = Telegram {
@@ -2372,7 +2343,6 @@ mod tests {
             sets: HashMap::new(),
             thumbnails: HashMap::new(),
             documents: HashMap::new(),
-            background_emojis: HashSet::new(),
             profile: None,
             profile_photo: None,
             profile_refresh_due: false,

@@ -1,0 +1,19 @@
+**
+
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!build.rs
+!src/**
+
+!web/package.json
+!web/bun.lock
+!web/index.html
+!web/tsconfig.json
+!web/vite.config.ts
+!web/src/**
+!web/public/**
+!web/scripts/**
+!web/tests/**
+# Frontend typechecking includes the preview tests and their JSON import.
+!web/preview-data/snapshot.json

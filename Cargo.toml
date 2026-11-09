@@ -15,7 +15,6 @@ grammers-client = "=0.11.0"
 grammers-mtsender = "=0.11.0"
 grammers-session = "=0.11.0"
 grammers-tl-types = "=0.11.0"
-fs2 = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 include_dir = "0.7"
 mime_guess = "2"

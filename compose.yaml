@@ -1,0 +1,13 @@
+services:
+  celine:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      CELINE_API_ID: ${CELINE_API_ID:?Set CELINE_API_ID in .env}
+      CELINE_API_HASH: ${CELINE_API_HASH:?Set CELINE_API_HASH in .env}
+    volumes:
+      - celine-data:/data
+
+volumes:
+  celine-data:

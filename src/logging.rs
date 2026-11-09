@@ -59,6 +59,11 @@ fn open_log(data_dir: &Path) -> Result<File> {
 mod tests {
     use super::*;
 
+    // Keep callsite interest process-wide while sibling tests use no subscriber.
+    fn pin_callsite_interest() -> tracing::Dispatch {
+        tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new())
+    }
+
     #[test]
     fn telegram_rpc_logs_method_and_wait_without_upstream_text() {
         use grammers_client::{InvocationError, tl};
@@ -68,6 +73,7 @@ mod tests {
         let subscriber = file_subscriber(dir.path()).unwrap();
         let method = tl::functions::photos::UpdateProfilePhoto::CONSTRUCTOR_ID;
         tracing::subscriber::with_default(subscriber, || {
+            let _interest = pin_callsite_interest();
             for name in ["FLOOD_WAIT", "private upstream text"] {
                 let error = InvocationError::Rpc(grammers_mtsender::RpcError {
                     code: 420,
@@ -101,6 +107,7 @@ mod tests {
         let subscriber = file_subscriber(dir.path()).unwrap();
         let app = crate::app::App::open(dir.path().join("account"), None).unwrap();
         async {
+            let _interest = pin_callsite_interest();
             let request = Request::post("/api/auth/password?private=query_secret")
                 .header("host", "127.0.0.1:7766")
                 .header("content-type", "application/json")
@@ -156,7 +163,7 @@ mod tests {
         let log = fs::read_to_string(dir.path().join("celine.log")).unwrap();
         assert!(log.contains("/api/auth/password"));
         assert!(log.contains("telegram.not_connected"));
-        assert!(log.contains("/api/photos/history/refresh"));
+        assert!(log.contains("/api/photos/history/refresh"), "log: {log}");
         assert!(log.contains("API request completed"));
         assert!(log.contains("/api/photos/{id}"));
         assert_eq!(log.matches("API request rejected").count(), 2);
@@ -176,6 +183,7 @@ mod tests {
         let subscriber = file_subscriber(dir.path()).unwrap();
         let data_dir = dir.path().join("data");
         async {
+            let _interest = pin_callsite_interest();
             let accounts = crate::accounts::Accounts::open(data_dir.clone(), None).unwrap();
             assert!(crate::accounts::Accounts::open(data_dir.clone(), None).is_err());
             drop(accounts);
@@ -204,6 +212,7 @@ mod tests {
         for message in ["first event", "second event"] {
             let subscriber = file_subscriber(dir.path()).unwrap();
             tracing::subscriber::with_default(subscriber, || {
+                let _interest = pin_callsite_interest();
                 tracing::info!(message);
                 tracing::debug!("debug events are not logged");
                 tracing::warn!(target: "grammers_client", "third-party data is not logged");

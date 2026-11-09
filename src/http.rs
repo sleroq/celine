@@ -4,14 +4,14 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     body::Body,
-    extract::{DefaultBodyLimit, MatchedPath, Multipart, Path, Query, State},
+    extract::{DefaultBodyLimit, Extension, MatchedPath, Multipart, Path, Query, State},
     http::{HeaderMap, Request, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
 use include_dir::{Dir, include_dir};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::Instrument;
 
@@ -24,7 +24,14 @@ use crate::{
 static ASSETS: Dir<'_> = include_dir!("$OUT_DIR/web");
 pub const ADDRESS: &str = "127.0.0.1:7766";
 
+#[cfg(test)]
 pub fn router(app: Arc<App>) -> Router {
+    app_routes()
+        .layer(middleware::from_fn(local_boundary))
+        .with_state(app)
+}
+
+fn app_routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/appearance/catalog", get(appearance_catalog))
         .route("/api/appearance/apply", put(apply_appearance))
@@ -65,8 +72,6 @@ pub fn router(app: Arc<App>) -> Router {
         .fallback(assets)
         .layer(DefaultBodyLimit::max(12 * 1024 * 1024))
         .layer(middleware::from_fn(log_request))
-        .layer(middleware::from_fn(local_boundary))
-        .with_state(app)
 }
 pub async fn serve(app: Arc<crate::accounts::Accounts>) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(ADDRESS).await?;
@@ -91,14 +96,34 @@ fn open_browser(url: String) {
     });
 }
 
+#[derive(Clone)]
+struct AccountRoutes {
+    accounts: Arc<crate::accounts::Accounts>,
+    routes: Router<Arc<App>>,
+}
+
+#[derive(Clone)]
+struct MediaScope(String);
+
+fn scoped_json(value: impl Serialize, scope: Option<Extension<MediaScope>>) -> Response {
+    let mut value = serde_json::to_value(value).unwrap();
+    if let Some(Extension(scope)) = scope {
+        crate::accounts::scope_media(&mut value, &scope.0);
+    }
+    Json(value).into_response()
+}
+
 pub fn accounts_router(accounts: Arc<crate::accounts::Accounts>) -> Router {
     Router::new()
         .fallback(account_request)
         .layer(middleware::from_fn(local_boundary))
-        .with_state(accounts)
+        .with_state(AccountRoutes {
+            accounts,
+            routes: app_routes(),
+        })
 }
 async fn account_request(
-    State(accounts): State<Arc<crate::accounts::Accounts>>,
+    State(AccountRoutes { accounts, routes }): State<AccountRoutes>,
     mut request: Request<Body>,
 ) -> Response {
     use tower::ServiceExt;
@@ -155,7 +180,9 @@ async fn account_request(
             .unwrap_or_default();
         *request.uri_mut() = format!("/api/{tail}{query}").parse().unwrap();
     }
-    let mut response = router(app)
+    request.extensions_mut().insert(MediaScope(id.clone()));
+    let mut response = routes
+        .with_state(app)
         .oneshot(request)
         .instrument(tracing::info_span!("account", account_id = id.as_str()))
         .await
@@ -168,20 +195,6 @@ async fn account_request(
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, MEDIA_CACHE.parse().unwrap());
-    }
-    if response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .is_some_and(|value| value == "application/json")
-    {
-        let (mut parts, body) = response.into_parts();
-        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
-        if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-            crate::accounts::scope_media(&mut value, &id);
-            parts.headers.remove(header::CONTENT_LENGTH);
-            return Response::from_parts(parts, Body::from(serde_json::to_vec(&value).unwrap()));
-        }
-        return Response::from_parts(parts, Body::from(bytes));
     }
     response
 }
@@ -280,8 +293,19 @@ fn ok() -> Response {
     StatusCode::NO_CONTENT.into_response()
 }
 async fn telegram_error(app: &App, error: TelegramError) -> Response {
+    if error.info.code.starts_with("validation.") {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            &error.message,
+            error.message_info(),
+        );
+    }
     app.record_telegram_error(&error).await;
-    let status = if error.retry_after.is_some() {
+    let status = if error.info.code.starts_with("storage.")
+        || error.info.code == "telegram.session_storage_failed"
+    {
+        StatusCode::INTERNAL_SERVER_ERROR
+    } else if error.retry_after.is_some() {
         StatusCode::TOO_MANY_REQUESTS
     } else if error.unauthorized {
         StatusCode::UNAUTHORIZED
@@ -296,8 +320,8 @@ async fn telegram_error(app: &App, error: TelegramError) -> Response {
     }
     response
 }
-async fn state(State(app): State<Arc<App>>) -> impl IntoResponse {
-    Json(app.state().await)
+async fn state(State(app): State<Arc<App>>, scope: Option<Extension<MediaScope>>) -> Response {
+    scoped_json(app.state().await, scope)
 }
 async fn settings(State(app): State<Arc<App>>, Json(settings): Json<Settings>) -> Response {
     match app.update_settings(settings).await {
@@ -698,7 +722,7 @@ async fn password(State(app): State<Arc<App>>, Json(password): Json<Password>) -
         Err(error) => telegram_error(&app, error).await,
     }
 }
-async fn emojis(State(app): State<Arc<App>>) -> Response {
+async fn emojis(State(app): State<Arc<App>>, scope: Option<Extension<MediaScope>>) -> Response {
     let mut connection = match app.connection().await {
         Ok(connection) => connection,
         Err(error) => return telegram_error(&app, error).await,
@@ -715,10 +739,16 @@ async fn emojis(State(app): State<Arc<App>>) -> Response {
         Err(error) => return telegram_error(&app, error).await,
     };
     app.remember_choices(&choices).await;
-    Json(json!({"choices":choices,"sets":sets,"premium":app.auth.read().await.premium}))
-        .into_response()
+    scoped_json(
+        json!({"choices":choices,"sets":sets,"premium":app.auth.read().await.premium}),
+        scope,
+    )
 }
-async fn search_emojis(State(app): State<Arc<App>>, Query(search): Query<EmojiSearch>) -> Response {
+async fn search_emojis(
+    State(app): State<Arc<App>>,
+    scope: Option<Extension<MediaScope>>,
+    Query(search): Query<EmojiSearch>,
+) -> Response {
     if search.offset < 0 {
         return api_error(
             StatusCode::BAD_REQUEST,
@@ -727,11 +757,13 @@ async fn search_emojis(State(app): State<Arc<App>>, Query(search): Query<EmojiSe
         );
     }
     if search.q.trim().is_empty() && search.emoticon.trim().is_empty() {
-        return Json(EmojiSearchResults {
-            choices: Vec::new(),
-            next_offset: None,
-        })
-        .into_response();
+        return scoped_json(
+            EmojiSearchResults {
+                choices: Vec::new(),
+                next_offset: None,
+            },
+            scope,
+        );
     }
     let mut connection = match app.connection().await {
         Ok(connection) => connection,
@@ -743,13 +775,17 @@ async fn search_emojis(State(app): State<Arc<App>>, Query(search): Query<EmojiSe
     match telegram.search_emojis(&search).await {
         Ok(results) => {
             app.remember_choices(&results.choices).await;
-            Json(results).into_response()
+            scoped_json(results, scope)
         }
         Err(error) => telegram_error(&app, error).await,
     }
 }
 
-async fn emoji_set(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Response {
+async fn emoji_set(
+    State(app): State<Arc<App>>,
+    scope: Option<Extension<MediaScope>>,
+    Path(id): Path<i64>,
+) -> Response {
     let mut connection = match app.connection().await {
         Ok(connection) => connection,
         Err(error) => return telegram_error(&app, error).await,
@@ -760,7 +796,7 @@ async fn emoji_set(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Response
     match telegram.emoji_set(id).await {
         Ok(choices) => {
             app.remember_choices(&choices).await;
-            Json(json!({"choices":choices})).into_response()
+            scoped_json(json!({"choices":choices}), scope)
         }
         Err(error) => telegram_error(&app, error).await,
     }
@@ -846,7 +882,10 @@ async fn assets(request: Request<Body>) -> Response {
     }
 }
 
-async fn appearance_catalog(State(app): State<Arc<App>>) -> Response {
+async fn appearance_catalog(
+    State(app): State<Arc<App>>,
+    scope: Option<Extension<MediaScope>>,
+) -> Response {
     let result = match app.connection().await {
         Ok(mut connection) => match connection.as_mut() {
             Some(telegram) => telegram.appearance_catalog().await,
@@ -855,11 +894,8 @@ async fn appearance_catalog(State(app): State<Arc<App>>) -> Response {
         Err(error) => Err(error),
     };
     match result {
-        Ok(catalog) => Json(catalog).into_response(),
-        Err(error) => {
-            app.record_telegram_error(&error).await;
-            bad(error.into())
-        }
+        Ok(catalog) => scoped_json(catalog, scope),
+        Err(error) => telegram_error(&app, error).await,
     }
 }
 async fn apply_appearance(
@@ -869,10 +905,7 @@ async fn apply_appearance(
     let result = app.apply_appearance(&value).await;
     match result {
         Ok(()) => ok(),
-        Err(error) => {
-            app.record_telegram_error(&error).await;
-            bad(error.into())
-        }
+        Err(error) => telegram_error(&app, error).await,
     }
 }
 #[derive(Deserialize)]
@@ -885,7 +918,10 @@ async fn appearance_presets(
 ) -> Response {
     match app.save_appearance_presets(value.presets).await {
         Ok(()) => ok(),
-        Err(error) => bad(error),
+        Err(error) => match error.downcast::<TelegramError>() {
+            Ok(error) => telegram_error(&app, error).await,
+            Err(error) => bad(error),
+        },
     }
 }
 async fn photo_appearance(
@@ -895,7 +931,10 @@ async fn photo_appearance(
 ) -> Response {
     match app.save_photo_appearance(&id, value).await {
         Ok(()) => ok(),
-        Err(error) => bad(error),
+        Err(error) => match error.downcast::<TelegramError>() {
+            Ok(error) => telegram_error(&app, error).await,
+            Err(error) => bad(error),
+        },
     }
 }
 async fn appearance_settings(State(app): State<Arc<App>>, Json(value): Json<Settings>) -> Response {
@@ -951,6 +990,24 @@ mod tests {
         assert_eq!(
             serde_json::to_value(app.state().await).unwrap()["last_error_info"],
             body["error_info"]
+        );
+
+        let response = telegram_error(
+            &app,
+            TelegramError {
+                info: MessageInfo::new("telegram.session_storage_failed"),
+                message: "Cannot read or save the local Telegram session.".into(),
+                retry_after: None,
+                unauthorized: false,
+            },
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body["error_info"]["code"],
+            "telegram.session_storage_failed"
         );
 
         let error = anyhow::anyhow!("Choose a positive interval in seconds.");
@@ -1764,6 +1821,140 @@ mod tests {
                 router.clone().oneshot(req).await.unwrap().status(),
                 StatusCode::TOO_MANY_REQUESTS
             );
+        }
+    }
+    #[tokio::test]
+    async fn media_dtos_are_scoped_before_json_serialization() {
+        let payload = json!({
+            "choices": [{"thumbnail_url": "/api/emojis/1/thumbnail", "label": "/api/emojis/1/media"}],
+            "sets": [{"cover_url": "/api/emojis/sets/2/cover?v=3"}],
+            "next_offset": 20
+        });
+        let expected = payload.clone();
+        let routes = Router::new().route(
+            "/",
+            get(move |scope: Option<Extension<MediaScope>>| {
+                let payload = payload.clone();
+                async move { scoped_json(payload, scope) }
+            }),
+        );
+        let response = routes
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .extension(MediaScope("account".into()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            value["choices"][0]["thumbnail_url"],
+            "/api/accounts/account/emojis/1/thumbnail"
+        );
+        assert_eq!(
+            value["sets"][0]["cover_url"],
+            "/api/accounts/account/emojis/sets/2/cover?v=3"
+        );
+        assert_eq!(
+            value["choices"][0]["label"],
+            expected["choices"][0]["label"]
+        );
+        assert_eq!(value["next_offset"], 20);
+        let response = routes.oneshot(Request::new(Body::empty())).await.unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            expected
+        );
+    }
+    #[tokio::test]
+    async fn appearance_presets_validate_ids_and_save_without_a_connection() {
+        let dir = tempfile::tempdir().unwrap();
+        let router = router(App::open(dir.path().into(), None).unwrap());
+        for (id, expected) in [
+            ("not-an-id", StatusCode::BAD_REQUEST),
+            ("123", StatusCode::NO_CONTENT),
+        ] {
+            let body = json!({"presets": [{"profile": {"color": null, "emoji": {
+                "id": id, "label": "Background", "source": "Default"
+            }}, "name": null}]});
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/api/appearance/presets")
+                        .header(header::HOST, ADDRESS)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+            if expected == StatusCode::BAD_REQUEST {
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(body["error_info"]["code"], "validation.appearance_emoji");
+            }
+        }
+        let response = router.oneshot(request("/api/state")).await.unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let state: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            state["appearance_presets"][0]["profile"]["emoji"]["id"],
+            "123"
+        );
+    }
+
+    #[tokio::test]
+    async fn appearance_routes_report_persisted_cooldown() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::open(dir.path().into(), None).unwrap();
+        app.record_telegram_error(&TelegramError {
+            info: MessageInfo::new("telegram.cooldown"),
+            message: "Flood wait".into(),
+            retry_after: Some(3600),
+            unauthorized: false,
+        })
+        .await;
+        drop(app);
+        let app = App::open(dir.path().into(), None).unwrap();
+        let router = router(app);
+        for (method, path, body) in [
+            ("GET", "/api/appearance/catalog", ""),
+            ("PUT", "/api/appearance/apply", "{}"),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header(header::HOST, ADDRESS)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert!(
+                response.headers()[header::RETRY_AFTER]
+                    .to_str()
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap()
+                    > 0
+            );
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(value["error_info"]["code"], "telegram.cooldown");
         }
     }
     #[tokio::test]

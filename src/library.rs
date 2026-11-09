@@ -408,6 +408,7 @@ pub struct Repository {
     dir: PathBuf,
     _lock: fs::File,
     photo_schedule_revision: u64,
+    pub appearance_schedule_revision: u64,
 }
 impl Repository {
     pub fn open(dir: PathBuf) -> Result<Self> {
@@ -423,7 +424,7 @@ impl Repository {
             .create(true)
             .truncate(false)
             .open(dir.join("celine.lock"))?;
-        fs2::FileExt::try_lock_exclusive(&lock)
+        lock.try_lock()
             .context("Celine is already using this data directory")?;
         fs::create_dir_all(dir.join("photos"))?;
         let mut data = match fs::read(dir.join("library.json")) {
@@ -476,6 +477,7 @@ impl Repository {
             dir,
             _lock: lock,
             photo_schedule_revision: 0,
+            appearance_schedule_revision: 0,
         })
     }
     pub fn photo_path(&self, id: &str) -> Result<PathBuf> {
@@ -713,12 +715,28 @@ impl Repository {
         file.persist(self.dir.join("library.json"))?;
         Ok(())
     }
-    pub fn schedule_photos(&mut self, settings: Settings, now: u64) -> Result<()> {
+    pub fn update_appearance_schedule(
+        &mut self,
+        change: impl FnOnce(&mut Library) -> Result<()>,
+    ) -> Result<()> {
+        self.update(change)?;
+        self.appearance_schedule_revision += 1;
+        Ok(())
+    }
+
+    pub fn schedule_photos(&mut self, settings: Settings, starting: bool, now: u64) -> Result<()> {
         self.update(|library| {
             if !settings.enabled {
                 library.pending_photo_id = None;
             }
-            library.update_settings(settings, now)
+            library.update_settings(settings, now)?;
+            library.photo_start_pending = starting;
+            if starting {
+                library.last_photo_id = None;
+                library.pending_photo_id = None;
+                library.next_rotation_at = Some(now);
+            }
+            Ok(())
         })?;
         self.photo_schedule_revision += 1;
         Ok(())
@@ -1934,5 +1952,40 @@ mod appearance_tests {
             serde_json::from_value(serde_json::to_value(&library).unwrap()).unwrap();
         assert_eq!(saved.last_appearance_index, Some(0));
         assert_eq!(saved.pending_photo_appearance.unwrap().photo_id, "photo");
+    }
+    #[test]
+    fn photo_schedule_commit_is_atomic_and_rolls_back_on_save_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut repo = Repository::open(dir.path().into()).unwrap();
+        repo.data.photos.push(Photo {
+            id: "a".into(),
+            name: "a".into(),
+            generated_name: None,
+            telegram_id: None,
+            history_checked: false,
+            crop: None,
+            emoji_status: None,
+            appearance: Appearance::default(),
+        });
+        let settings = Settings {
+            enabled: true,
+            ..Default::default()
+        };
+        repo.schedule_photos(settings.clone(), true, 100).unwrap();
+        let saved: Library =
+            serde_json::from_slice(&fs::read(dir.path().join("library.json")).unwrap()).unwrap();
+        assert!(saved.photo_start_pending);
+        assert_eq!(saved.next_rotation_at, Some(100));
+        assert!(saved.last_photo_id.is_none());
+        let before = serde_json::to_value(&repo.data).unwrap();
+        let revision = repo.photo_schedule_revision();
+        fs::remove_file(dir.path().join("library.json")).unwrap();
+        fs::create_dir(dir.path().join("library.json")).unwrap();
+        assert!(
+            repo.schedule_photos(Settings::default(), false, 200)
+                .is_err()
+        );
+        assert_eq!(serde_json::to_value(&repo.data).unwrap(), before);
+        assert_eq!(repo.photo_schedule_revision(), revision);
     }
 }

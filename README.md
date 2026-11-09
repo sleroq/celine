@@ -22,15 +22,34 @@ Check out [Demo](https://celine.cum.army)
 
 ## Get started
 
-Download and run the binary for your platform:
+1. Obtain your own API credentials at <https://my.telegram.org/apps>, then:
 
-- [macOS ARM64](https://github.com/sleroq/celine/releases/latest/download/celine-aarch64-apple-darwin)
-- [Windows x64](https://github.com/sleroq/celine/releases/latest/download/celine-x86_64-pc-windows-msvc.exe)
+2. Fill out env file from the example: `cp .env.example .env`
 
-Other platforms are available on [Releases](../../releases).
+2. Download and run the binary for your platform:
+    - [macOS ARM64](https://github.com/sleroq/celine/releases/latest/download/celine-aarch64-apple-darwin)
+    - [Windows x64](https://github.com/sleroq/celine/releases/latest/download/celine-x86_64-pc-windows-msvc.exe)
+
+    Other platforms are available on [Releases](../../releases).
+
+    Or run via nix / docker (instructions below)
+
 
 ## Run with Nix
 
 ```sh
 nix run github:sleroq/celine
+```
+
+## Run with Docker (Linux)
+
+
+```sh
+docker compose up -d --build
+```
+
+For production deployments on the servers, attach UI via ssh tunnel. Avoid exposing UI publicly:
+
+```sh
+ssh -N -L 7766:127.0.0.1:7766 user@server
 ```

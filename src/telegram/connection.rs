@@ -126,6 +126,13 @@ impl Connection {
         &self.live().client
     }
 
+    pub(super) fn available_client(&self) -> Result<&Client, TelegramError> {
+        self.live
+            .as_ref()
+            .map(|live| &live.client)
+            .ok_or_else(storage_error)
+    }
+
     pub(super) fn was_authorized(&self) -> bool {
         self.was_authorized
     }
@@ -542,14 +549,30 @@ mod tests {
         connection.shutdown().await.unwrap();
     }
 
+    #[tokio::test]
+    async fn logout_after_failed_authorized_reset_returns_error() {
+        let (_directory, mut telegram) = super::super::tests::offline_telegram().await;
+        telegram.connection.was_authorized = true;
+        let journal = telegram
+            .connection
+            .path
+            .with_file_name(format!("{SESSION_FILE}-journal"));
+        fs::create_dir(&journal).unwrap();
+        assert!(telegram.connection.reset().await.is_err());
+        assert_eq!(
+            telegram.logout().await.unwrap_err().info.code,
+            "telegram.session_storage_failed"
+        );
+        fs::remove_dir(journal).unwrap();
+        telegram.connection.reset().await.unwrap();
+        telegram.connection.shutdown().await.unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
-    fn session_is_private_and_does_not_touch_legacy_session() {
+    fn session_is_private_and_preserves_native_session() {
         let directory = tempfile::tempdir().unwrap();
-        let legacy = directory.path().join("telegram.session");
-        fs::write(&legacy, b"legacy session").unwrap();
         let path = prepare_store(directory.path()).unwrap();
-        assert_eq!(fs::read(legacy).unwrap(), b"legacy session");
         assert_eq!(
             fs::metadata(path.parent().unwrap())
                 .unwrap()

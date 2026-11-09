@@ -248,11 +248,45 @@ impl App {
     pub async fn disconnect(&self) {
         *self.telegram.lock().await = None;
     }
+    pub async fn summary(&self) -> (AuthState, Option<Profile>) {
+        (
+            self.auth.read().await.clone(),
+            self.profile.read().await.clone(),
+        )
+    }
     pub async fn state(&self) -> State {
         let auth = self.auth.read().await.clone();
-        let photo_cache = self.photo_cache.lock().await;
-        let repository = self.repository.lock().await;
-        let library = repository.data.clone();
+        let (library, recovery_snapshot, photos, status) = {
+            let photo_cache = self.photo_cache.lock().await;
+            let repository = self.repository.lock().await;
+            let status = *self.photo_cache_status.read().await;
+            let library = repository.data.clone();
+            let recovery = (status == PhotoCacheStatus::Ready
+                && photo_cache.complete()
+                && library.photos.iter().any(|photo| {
+                    photo
+                        .telegram_id
+                        .as_deref()
+                        .is_some_and(|id| !photo_cache.contains(id))
+                }))
+            .then(|| (photo_cache.clone(), Self::recovery_paths(&repository)));
+            let photos = photo_cache
+                .available()
+                .into_iter()
+                .map(|id| HistoryPhoto { id })
+                .collect();
+            (library, recovery, photos, status)
+        };
+        let (library, recovery) = if let Some((cache, paths)) = recovery_snapshot {
+            tokio::task::spawn_blocking(move || {
+                let recovery = Self::photo_recovery(&cache, &library, &paths);
+                (library, recovery)
+            })
+            .await
+            .expect("photo recovery task panicked")
+        } else {
+            (library, Default::default())
+        };
         let selected_emoji_ids = library
             .selected_emojis
             .iter()
@@ -267,23 +301,11 @@ impl App {
             .or(self.photo_status_error.read().await.clone())
             .or(self.emoji_error.read().await.clone())
             .or(self.appearance_error.read().await.clone());
-        let recovery = if *self.photo_cache_status.read().await == PhotoCacheStatus::Ready
-            && photo_cache.complete()
-        {
-            Self::photo_recovery(&photo_cache, &repository)
-        } else {
-            Default::default()
-        };
-        let photos = photo_cache
-            .available()
-            .into_iter()
-            .map(|id| HistoryPhoto { id })
-            .collect();
         State {
             auth,
             profile: self.profile.read().await.clone(),
             photo_cache: PhotoCacheView {
-                status: *self.photo_cache_status.read().await,
+                status,
                 photos,
                 recovery,
             },
@@ -362,16 +384,7 @@ impl App {
             }
         } else {
             let starting = matches!(action, ScheduleAction::Start);
-            repository.schedule_photos(settings, now())?;
-            repository.update(|library| {
-                library.photo_start_pending = starting;
-                if starting {
-                    library.last_photo_id = None;
-                    library.pending_photo_id = None;
-                    library.next_rotation_at = Some(now());
-                }
-                Ok(())
-            })?;
+            repository.schedule_photos(settings, starting, now())?;
         }
         if emoji {
             *self.emoji_error.write().await = None;
@@ -519,8 +532,20 @@ impl App {
         Ok(())
     }
 
+    async fn persist_telegram_retry(
+        &self,
+        result: Result<(), TelegramError>,
+        original: &TelegramError,
+    ) -> Result<(), TelegramError> {
+        if result.is_err() {
+            self.record_telegram_error(original).await;
+        }
+        result
+    }
+
     async fn defer_photo_status(&self, error: &TelegramError) -> Result<(), TelegramError> {
-        self.repository
+        let result = self
+            .repository
             .lock()
             .await
             .update(|library| {
@@ -531,7 +556,8 @@ impl App {
                 }
                 Ok(())
             })
-            .map_err(storage_error)
+            .map_err(storage_error);
+        self.persist_telegram_retry(result, error).await
     }
 
     async fn retry_photo_status(
@@ -635,7 +661,11 @@ impl App {
                 }
                 continue;
             }
-            let Some(matches) = Self::recovery_matches(&cache, &repository, photo) else {
+            let Some(matches) = Self::recovery_matches(
+                &cache,
+                repository.photo_path(&photo.id).ok().as_deref(),
+                photo,
+            ) else {
                 continue;
             };
             let matched = matches.into_iter().find(|id| !used.contains(id));
@@ -663,13 +693,10 @@ impl App {
 
     fn recovery_matches(
         cache: &PhotoCache,
-        repository: &Repository,
+        path: Option<&std::path::Path>,
         photo: &Photo,
     ) -> Option<Vec<String>> {
-        repository
-            .photo_path(&photo.id)
-            .ok()
-            .and_then(|path| std::fs::read(path).ok())
+        path.and_then(|path| std::fs::read(path).ok())
             .and_then(|bytes| cache.matches(&bytes).ok())
             .or_else(|| {
                 photo
@@ -679,13 +706,29 @@ impl App {
             })
     }
 
-    fn photo_recovery(
-        cache: &PhotoCache,
+    fn recovery_paths(
         repository: &Repository,
-    ) -> std::collections::HashMap<String, PhotoRecovery> {
-        let ids = cache.photos();
+    ) -> std::collections::HashMap<String, std::path::PathBuf> {
         repository
             .data
+            .photos
+            .iter()
+            .filter_map(|photo| {
+                repository
+                    .photo_path(&photo.id)
+                    .ok()
+                    .map(|path| (photo.id.clone(), path))
+            })
+            .collect()
+    }
+
+    fn photo_recovery(
+        cache: &PhotoCache,
+        library: &Library,
+        paths: &std::collections::HashMap<String, std::path::PathBuf>,
+    ) -> std::collections::HashMap<String, PhotoRecovery> {
+        let ids = cache.photos();
+        library
             .photos
             .iter()
             .filter_map(|photo| {
@@ -693,13 +736,16 @@ impl App {
                 if ids.contains(id) {
                     return None;
                 }
-                let matches = Self::recovery_matches(cache, repository, photo);
+                let matches = Self::recovery_matches(
+                    cache,
+                    paths.get(&photo.id).map(|path| path.as_path()),
+                    photo,
+                );
                 let matched = matches.as_ref().and_then(|matches| {
                     matches
                         .iter()
                         .find(|id| {
-                            !repository
-                                .data
+                            !library
                                 .photos
                                 .iter()
                                 .any(|other| other.telegram_id.as_ref() == Some(id))
@@ -707,8 +753,7 @@ impl App {
                         .or_else(|| matches.first())
                 });
                 let duplicate_of = matched.and_then(|id| {
-                    repository
-                        .data
+                    library
                         .photos
                         .iter()
                         .find(|other| {
@@ -763,7 +808,8 @@ impl App {
             .iter()
             .find(|photo| photo.id == id)
             .context(Message::new("photo.not_found", "Photo not found."))?;
-        let recovery = Self::photo_recovery(&cache, &repository);
+        let recovery =
+            Self::photo_recovery(&cache, &repository.data, &Self::recovery_paths(&repository));
         let entry = recovery.get(id).context(Message::new(
             "photo.recovery_changed",
             "Photo is no longer awaiting recovery. Refresh the photo list.",
@@ -947,10 +993,18 @@ impl App {
         Ok(())
     }
     pub async fn record_telegram_error(&self, error: &TelegramError) {
-        *self.last_error.write().await = Some(LocalizedMessage::new(
-            error.message.clone(),
-            error.message_info(),
-        ));
+        {
+            let mut last_error = self.last_error.write().await;
+            let cooldown_save_failed = last_error
+                .as_ref()
+                .is_some_and(|message| message.info.code == "storage.cooldown_save_failed");
+            if error.info.code != "storage.state_save_failed" || !cooldown_save_failed {
+                *last_error = Some(LocalizedMessage::new(
+                    error.message.clone(),
+                    error.message_info(),
+                ));
+            }
+        }
         if let Some(wait) = error.retry_after {
             let until = now().saturating_add(wait);
             let mut repository = self.repository.lock().await;
@@ -962,6 +1016,7 @@ impl App {
                     })
                     .is_err()
             {
+                repository.data.defer_telegram(until);
                 tracing::warn!(
                     code = "storage.cooldown_save_failed",
                     "Telegram cooldown could not be persisted"
@@ -1010,7 +1065,11 @@ impl App {
                         }
                         drop(status);
                         self.record_telegram_error(&error).await;
-                        let retry_in_seconds = error.retry_after.unwrap_or(30).max(2);
+                        let retry_in_seconds = if error.info.code == "storage.state_save_failed" {
+                            60
+                        } else {
+                            error.retry_after.unwrap_or(30).max(2)
+                        };
                         retry_at = now().saturating_add(retry_in_seconds);
                         tracing::warn!(
                             code = error.info.code,
@@ -1128,7 +1187,7 @@ impl App {
             || repository.data.pending_photo_appearance.is_some()
         {
             repository
-                .update(|library| {
+                .update_appearance_schedule(|library| {
                     let mut settings = library.appearance_settings.clone();
                     settings.enabled = false;
                     library.pending_photo_appearance = None;
@@ -1217,7 +1276,8 @@ impl App {
                     skipped.push(photo.id);
                 }
                 Err(error) => {
-                    self.repository
+                    let result = self
+                        .repository
                         .lock()
                         .await
                         .retry_photo_rotation(
@@ -1225,7 +1285,8 @@ impl App {
                             now(),
                             error.retry_after.unwrap_or(30).max(2),
                         )
-                        .map_err(storage_error)?;
+                        .map_err(storage_error);
+                    self.persist_telegram_retry(result, &error).await?;
                     return Err(error);
                 }
             }
@@ -1254,12 +1315,9 @@ impl App {
                 let fingerprint = crate::photo_match::Fingerprint::decode(bytes)
                     .map_err(|error| storage_error(error.into()))?;
                 for photo in &photos {
-                    let path = self
-                        .repository
-                        .lock()
-                        .await
-                        .photo_path(&photo.id)
-                        .map_err(storage_error)?;
+                    let Ok(path) = self.repository.lock().await.photo_path(&photo.id) else {
+                        continue;
+                    };
                     let bytes = match tokio::fs::read(path).await {
                         Ok(bytes) => bytes,
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -1287,6 +1345,7 @@ impl App {
         if !repository.photo_schedule_is_current(revision) {
             return Ok(());
         }
+        matched = matched.filter(|id| repository.data.photos.iter().any(|photo| photo.id == *id));
         repository
             .update(|library| {
                 library.photo_start_pending = false;
@@ -1408,26 +1467,10 @@ impl App {
                 ));
             }
         }
-        repository.update(|library| library.update_appearance_settings(settings, now()))?;
+        repository.update_appearance_schedule(|library| {
+            library.update_appearance_settings(settings, now())
+        })?;
         *self.appearance_error.write().await = None;
-        Ok(())
-    }
-    async fn validate_saved_appearance(
-        &self,
-        appearance: &crate::library::Appearance,
-    ) -> Result<()> {
-        if [&appearance.profile, &appearance.name]
-            .into_iter()
-            .flatten()
-            .any(|value| value.emoji.is_some())
-        {
-            let mut connection = self.connection().await?;
-            connection
-                .as_mut()
-                .ok_or_else(unavailable)?
-                .validate_appearance(appearance)
-                .await?;
-        }
         Ok(())
     }
     pub async fn save_appearance_presets(
@@ -1435,19 +1478,22 @@ impl App {
         presets: Vec<crate::library::Appearance>,
     ) -> Result<()> {
         for appearance in &presets {
-            self.validate_saved_appearance(appearance).await?;
+            Telegram::validate_appearance(appearance)?;
         }
-        self.repository.lock().await.update(|library| {
-            library.appearance_presets = presets;
-            library.last_appearance_index = None;
-            library.pending_appearance_index = None;
-            if library.appearance_presets.is_empty() {
-                let mut settings = library.appearance_settings.clone();
-                settings.enabled = false;
-                library.update_appearance_settings(settings, now())?;
-            }
-            Ok(())
-        })?;
+        self.repository
+            .lock()
+            .await
+            .update_appearance_schedule(|library| {
+                library.appearance_presets = presets;
+                library.last_appearance_index = None;
+                library.pending_appearance_index = None;
+                if library.appearance_presets.is_empty() {
+                    let mut settings = library.appearance_settings.clone();
+                    settings.enabled = false;
+                    library.update_appearance_settings(settings, now())?;
+                }
+                Ok(())
+            })?;
         *self.appearance_error.write().await = None;
         Ok(())
     }
@@ -1456,12 +1502,12 @@ impl App {
         id: &str,
         appearance: crate::library::Appearance,
     ) -> Result<()> {
-        self.validate_saved_appearance(&appearance).await?;
+        Telegram::validate_appearance(&appearance)?;
         let mut connection = self.lock_telegram().await;
         let queued = {
             let mut repository = self.repository.lock().await;
             let mut queued = false;
-            repository.update(|library| {
+            repository.update_appearance_schedule(|library| {
                 library.set_photo_appearance(id, appearance.clone())?;
                 if library
                     .pending_photo_appearance
@@ -1510,7 +1556,8 @@ impl App {
         Ok(())
     }
     async fn defer_photo_appearance(&self, error: &TelegramError) -> Result<(), TelegramError> {
-        self.repository
+        let result = self
+            .repository
             .lock()
             .await
             .update(|library| {
@@ -1521,13 +1568,14 @@ impl App {
                 }
                 Ok(())
             })
-            .map_err(storage_error)
+            .map_err(storage_error);
+        self.persist_telegram_retry(result, error).await
     }
     async fn rotate_appearance_if_due(
         &self,
         telegram: &mut impl AppearanceClient,
     ) -> Result<(), TelegramError> {
-        let (appearance, index, photo) = {
+        let (appearance, index, photo, revision) = {
             let mut repository = self.repository.lock().await;
             let library = &repository.data;
             if now() < library.telegram_not_before.unwrap_or(0) {
@@ -1570,15 +1618,22 @@ impl App {
                     Ok(())
                 })
                 .map_err(storage_error)?;
-            (appearance, index, photo)
+            (
+                appearance,
+                index,
+                photo,
+                repository.appearance_schedule_revision,
+            )
         };
         let result = telegram.apply_appearance(&appearance).await;
         *self.profile.write().await = telegram.profile();
+        let mut repository = self.repository.lock().await;
+        if !photo && repository.appearance_schedule_revision != revision {
+            return result;
+        }
         if let Err(error) = result {
             if !photo {
-                self.repository
-                    .lock()
-                    .await
+                let result = repository
                     .update(|library| {
                         library.next_appearance_rotation_at = Some(
                             now()
@@ -1587,18 +1642,17 @@ impl App {
                         );
                         Ok(())
                     })
-                    .map_err(storage_error)?;
-            }
-            if photo {
+                    .map_err(storage_error);
+                drop(repository);
+                self.persist_telegram_retry(result, &error).await?;
+            } else {
+                drop(repository);
                 self.defer_photo_appearance(&error).await?;
             }
             return Err(error);
         }
-        *self.profile.write().await = telegram.profile();
         *self.appearance_error.write().await = None;
-        self.repository
-            .lock()
-            .await
+        repository
             .update(|library| {
                 if photo {
                     library.pending_photo_appearance = None;
@@ -1659,7 +1713,9 @@ impl App {
     }
 }
 fn blocks_telegram(error: &TelegramError) -> bool {
-    error.unauthorized || error.retry_after.is_some()
+    error.unauthorized
+        || error.retry_after.is_some()
+        || error.info.code == "storage.state_save_failed"
 }
 pub fn unavailable() -> TelegramError {
     TelegramError {
@@ -1676,11 +1732,11 @@ fn storage_error(error: anyhow::Error) -> TelegramError {
         "Celine state operation failed"
     );
     TelegramError {
-        info: crate::messages::MessageInfo::new("storage.state_save_failed"),
+        info: crate::messages::MessageInfo::parameter("storage.state_save_failed", "seconds", 60),
         message:
             "Cannot save Celine state. Check available disk space and data-directory permissions."
                 .into(),
-        retry_after: Some(60),
+        retry_after: None,
         unauthorized: false,
     }
 }
@@ -1770,6 +1826,7 @@ mod tests {
     }
 
     enum PhotoCall {
+        PausedCurrent(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>),
         Current(Option<(&'static str, Vec<u8>)>),
         Use(&'static str, Result<bool, TelegramError>),
         Upload(&'static str),
@@ -1796,11 +1853,20 @@ mod tests {
             result
         }
         async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
-            let Some(PhotoCall::Current(photo)) = self.0.pop_front() else {
-                panic!("unexpected current photo request")
-            };
-            Ok(photo.map(|(id, bytes)| (id.into(), bytes)))
+            match self.0.pop_front() {
+                Some(PhotoCall::Current(photo)) => Ok(photo.map(|(id, bytes)| (id.into(), bytes))),
+                Some(PhotoCall::PausedCurrent(entered, release)) => {
+                    entered.notify_one();
+                    release.notified().await;
+                    Ok(Some((
+                        "1".into(),
+                        include_bytes!("../web/public/logo.jpg").to_vec(),
+                    )))
+                }
+                _ => panic!("unexpected current photo request"),
+            }
         }
+
         async fn use_history_photo(&mut self, id: &str) -> Result<bool, TelegramError> {
             let Some(PhotoCall::Use(expected, result)) = self.0.pop_front() else {
                 panic!("unexpected history request for {id}");
@@ -1832,15 +1898,263 @@ mod tests {
         serde_json::from_value(serde_json::json!({"id":"collectible:100","document_id":"42","label":"Gift","source":"Gift","text_color":false})).unwrap()
     }
 
-    struct FailedAppearance {
-        attempts: usize,
-        fail: bool,
+    struct RetryPersistenceFailure {
+        dir: std::path::PathBuf,
+        unauthorized: bool,
     }
-    impl AppearanceClient for FailedAppearance {
+    impl RetryPersistenceFailure {
+        fn fail(&self) -> TelegramError {
+            let path = self.dir.join("library.json");
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(path).unwrap();
+            let mut error = unavailable();
+            error.retry_after = Some(3600);
+            error.unauthorized = self.unauthorized;
+            error
+        }
+    }
+    impl AppearanceClient for RetryPersistenceFailure {
         async fn apply_appearance(
             &mut self,
             _: &crate::library::Appearance,
         ) -> Result<(), TelegramError> {
+            Err(self.fail())
+        }
+        fn profile(&self) -> Option<Profile> {
+            None
+        }
+    }
+    impl PhotoClient for RetryPersistenceFailure {
+        async fn set_emoji_status(&mut self, _: Option<&str>) -> Result<(), TelegramError> {
+            Err(self.fail())
+        }
+        async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
+            panic!("unexpected reconciliation")
+        }
+        async fn use_history_photo(&mut self, _: &str) -> Result<bool, TelegramError> {
+            Err(self.fail())
+        }
+        async fn set_photo(&mut self, _: &std::path::Path) -> Result<String, TelegramError> {
+            panic!("unexpected upload")
+        }
+    }
+
+    #[tokio::test]
+    async fn appearance_retry_storage_failure_retains_telegram_error() {
+        for linked in [false, true] {
+            for unauthorized in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let app = App::open(dir.path().into(), None).unwrap();
+                app.auth.write().await.status = "authorized".into();
+                app.repository
+                    .lock()
+                    .await
+                    .update(|library| {
+                        let appearance = crate::library::Appearance::default();
+                        if linked {
+                            library.pending_photo_appearance =
+                                Some(crate::library::PendingPhotoAppearance {
+                                    photo_id: "a".into(),
+                                    appearance,
+                                    retry_at: 0,
+                                });
+                        } else {
+                            library.appearance_presets = vec![appearance];
+                            let mut settings = library.appearance_settings.clone();
+                            settings.enabled = true;
+                            library.update_appearance_settings(settings, 0)?;
+                            library.next_appearance_rotation_at = Some(0);
+                        }
+                        Ok(())
+                    })
+                    .unwrap();
+                let before = now();
+                let error = app
+                    .rotate_appearance_if_due(&mut RetryPersistenceFailure {
+                        dir: dir.path().into(),
+                        unauthorized,
+                    })
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.info.code, "storage.state_save_failed");
+                assert_eq!(error.retry_after, None);
+                assert!(
+                    app.repository
+                        .lock()
+                        .await
+                        .data
+                        .telegram_not_before
+                        .unwrap()
+                        >= before + 3600
+                );
+                assert_eq!(
+                    app.auth.read().await.status,
+                    if unauthorized {
+                        "disconnected"
+                    } else {
+                        "authorized"
+                    }
+                );
+                // The worker records the returned storage error after the failed retry.
+                app.record_telegram_error(&error).await;
+                assert_eq!(
+                    app.state().await.last_error_info.unwrap().code,
+                    "storage.cooldown_save_failed"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn photo_retry_storage_failure_retains_telegram_error() {
+        for status in [false, true] {
+            let (dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+            app.auth.write().await.status = "authorized".into();
+            if status {
+                app.repository
+                    .lock()
+                    .await
+                    .update(|library| {
+                        library.pending_photo_status = Some(PendingPhotoStatus {
+                            photo_id: "a".into(),
+                            status_id: Some("42".into()),
+                            retry_at: 0,
+                        });
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            let mut client = RetryPersistenceFailure {
+                dir: dir.path().into(),
+                unauthorized: true,
+            };
+            let before = now();
+            let error = if status {
+                app.retry_photo_status(&mut client).await
+            } else {
+                app.rotate_photos_if_due(&mut client).await
+            }
+            .unwrap_err();
+            assert_eq!(error.info.code, "storage.state_save_failed");
+            assert_eq!(error.retry_after, None);
+            assert!(
+                app.repository
+                    .lock()
+                    .await
+                    .data
+                    .telegram_not_before
+                    .unwrap()
+                    >= before + 3600
+            );
+            assert_eq!(app.auth.read().await.status, "disconnected");
+        }
+    }
+
+    struct BlockedAppearance {
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+        fail: bool,
+    }
+    impl AppearanceClient for BlockedAppearance {
+        async fn apply_appearance(
+            &mut self,
+            _: &crate::library::Appearance,
+        ) -> Result<(), TelegramError> {
+            self.entered.notify_one();
+            self.release.notified().await;
+            if self.fail {
+                let mut error = unavailable();
+                error.retry_after = Some(60);
+                Err(error)
+            } else {
+                Ok(())
+            }
+        }
+        fn profile(&self) -> Option<Profile> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn superseded_appearance_completion_does_not_change_new_schedule() {
+        for fail in [false, true] {
+            for stop in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let app = App::open(dir.path().into(), None).unwrap();
+                app.save_appearance_presets(vec![crate::library::Appearance::default()])
+                    .await
+                    .unwrap();
+                app.repository
+                    .lock()
+                    .await
+                    .update(|library| {
+                        let mut settings = library.appearance_settings.clone();
+                        settings.enabled = true;
+                        library.update_appearance_settings(settings, 0)?;
+                        library.next_appearance_rotation_at = Some(0);
+                        Ok(())
+                    })
+                    .unwrap();
+                let entered = Arc::new(tokio::sync::Notify::new());
+                let release = Arc::new(tokio::sync::Notify::new());
+                let mut client = BlockedAppearance {
+                    entered: entered.clone(),
+                    release: release.clone(),
+                    fail,
+                };
+                let (result, expected) =
+                    tokio::join!(app.rotate_appearance_if_due(&mut client), async {
+                        entered.notified().await;
+                        if stop {
+                            app.schedule_appearance(ScheduleAction::Stop).await.unwrap();
+                        } else {
+                            app.save_appearance_presets(vec![crate::library::Appearance {
+                                name: Some(crate::library::AppearanceValue::default()),
+                                ..Default::default()
+                            }])
+                            .await
+                            .unwrap();
+                        }
+                        let expected =
+                            serde_json::to_value(&app.repository.lock().await.data).unwrap();
+                        release.notify_one();
+                        expected
+                    });
+                if fail {
+                    assert_eq!(result.unwrap_err().retry_after, Some(60));
+                } else {
+                    result.unwrap();
+                }
+                assert_eq!(
+                    serde_json::to_value(&app.repository.lock().await.data).unwrap(),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn storage_failure_does_not_create_telegram_cooldown() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::open(dir.path().into(), None).unwrap();
+        let error = storage_error(anyhow::anyhow!("disk full"));
+        assert_eq!(error.retry_after, None);
+        assert!(blocks_telegram(&error));
+        app.record_telegram_error(&error).await;
+        assert_eq!(app.repository.lock().await.data.telegram_not_before, None);
+    }
+
+    struct FailedAppearance {
+        attempts: usize,
+        fail: bool,
+        applied: Vec<crate::library::Appearance>,
+    }
+    impl AppearanceClient for FailedAppearance {
+        async fn apply_appearance(
+            &mut self,
+            appearance: &crate::library::Appearance,
+        ) -> Result<(), TelegramError> {
+            self.applied.push(appearance.clone());
             self.attempts += 1;
             if self.fail {
                 let mut error = unavailable();
@@ -1889,8 +2203,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = App::open(dir.path().into(), None).unwrap();
         app.save_appearance_presets(vec![
-            crate::library::Appearance::default(),
-            crate::library::Appearance::default(),
+            crate::library::Appearance {
+                profile: Some(crate::library::AppearanceValue {
+                    color: Some(1),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            crate::library::Appearance {
+                profile: Some(crate::library::AppearanceValue {
+                    color: Some(2),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
         ])
         .await
         .unwrap();
@@ -1914,6 +2240,7 @@ mod tests {
         let mut client = FailedAppearance {
             attempts: 0,
             fail: true,
+            applied: Vec::new(),
         };
         let before = now();
         assert!(app.rotate_appearance_if_due(&mut client).await.is_err());
@@ -1938,6 +2265,22 @@ mod tests {
         client.fail = false;
         app.rotate_appearance_if_due(&mut client).await.unwrap();
         let library = app.state().await.library;
+        assert_eq!(
+            client.applied[0].profile.as_ref().unwrap().color,
+            library.appearance_presets[pending]
+                .profile
+                .as_ref()
+                .unwrap()
+                .color
+        );
+        assert_eq!(
+            client.applied[1].profile.as_ref().unwrap().color,
+            library.appearance_presets[pending]
+                .profile
+                .as_ref()
+                .unwrap()
+                .color
+        );
         assert_eq!(library.last_appearance_index, Some(pending));
         assert!(library.pending_appearance_index.is_none());
         assert!(library.next_appearance_rotation_at.unwrap() >= before + 3600);
@@ -2339,6 +2682,30 @@ mod tests {
         client.assert_finished();
         assert!(!app.state().await.library.photo_start_pending);
         retry_status_now(&app, Some("collectible:100")).await;
+    }
+
+    #[tokio::test]
+    async fn state_recovers_stale_photo_from_local_bytes_with_complete_history() {
+        let (_dir, app) = photo_app(vec![
+            photo("stale", Some("1"), true),
+            photo("current", Some("2"), true),
+        ])
+        .await;
+        write_photo(&app, "stale").await;
+        {
+            let mut cache = app.photo_cache.lock().await;
+            cache.set_history(vec!["2".into()]).unwrap();
+            cache
+                .store("2", include_bytes!("../web/public/logo.jpg"))
+                .unwrap();
+        }
+        let state = app.state().await;
+        assert_eq!(
+            state.photo_cache.recovery["stale"].duplicate_of.as_deref(),
+            Some("current")
+        );
+        assert!(!state.photo_cache.recovery["stale"].can_upload);
+        assert_eq!(state.library.photos[0].telegram_id.as_deref(), Some("1"));
     }
 
     #[tokio::test]
@@ -2747,6 +3114,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deleted_start_match_becomes_pending_first() {
+        for linked in [false, true] {
+            let (_dir, app) = photo_app(vec![
+                photo("a", linked.then_some("1"), true),
+                photo("b", Some("2"), true),
+            ])
+            .await;
+            app.auth.write().await.status = "authorized".into();
+            app.schedule(false, ScheduleAction::Start).await.unwrap();
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
+            let mut client =
+                FakePhotos::new([PhotoCall::PausedCurrent(entered.clone(), release.clone())]);
+            let (result, ()) = tokio::join!(app.resume_photos(&mut client), async {
+                entered.notified().await;
+                app.remove_photo("a").await.unwrap();
+                release.notify_one();
+            });
+            result.unwrap();
+            let repository = app.repository.lock().await;
+            assert_eq!(repository.data.last_photo_id, None);
+            assert_eq!(repository.data.pending_photo_id.as_deref(), Some("b"));
+            assert!(!repository.data.photo_start_pending);
+            assert!(repository.data.applied_settings.is_some());
+        }
+    }
+
+    #[tokio::test]
     async fn start_matches_current_photo_waits_and_continues_from_it() {
         for linked in [false, true] {
             let (_dir, app) = photo_app(vec![
@@ -3146,17 +3541,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn missed_schedule_runs_once_not_a_catchup_loop() {
-        let mut library = Library::default();
-        library.settings.enabled = true;
-        library.applied_settings = Some(library.settings.clone());
-        library.next_rotation_at = Some(100);
-        assert!(library.photo_rotation_due(10000));
-        library.next_rotation_at = Some(library.settings.next_at(10000));
-        assert!(!library.photo_rotation_due(10000));
-        library.applied_settings = None;
-        assert!(!library.photo_rotation_due(u64::MAX));
+    #[tokio::test]
+    async fn overdue_photo_schedule_applies_once_and_schedules_from_now() {
+        let (_dir, app) = photo_app(vec![photo("a", Some("1"), true)]).await;
+        let before = now();
+        let mut client = FakePhotos::new([PhotoCall::Use("1", Ok(true))]);
+        app.rotate_photos_if_due(&mut client).await.unwrap();
+        app.rotate_photos_if_due(&mut client).await.unwrap();
+        client.assert_finished();
+        let repository = app.repository.lock().await;
+        assert_eq!(repository.data.last_photo_id.as_deref(), Some("a"));
+        assert!(repository.data.next_rotation_at.unwrap() > before);
     }
     #[test]
     fn photo_and_emoji_due_times_are_independent() {
@@ -3177,7 +3572,10 @@ mod tests {
         assert!(library.photo_rotation_due(300));
     }
     #[test]
-    fn only_authorization_and_cooldown_errors_block_the_other_rotation() {
+    fn telegram_blocking_predicate_includes_authorization_cooldown_and_storage() {
+        assert!(blocks_telegram(&storage_error(anyhow::anyhow!(
+            "disk full"
+        ))));
         let mut error = unavailable();
         assert!(!blocks_telegram(&error));
         error.retry_after = Some(60);

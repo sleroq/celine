@@ -25,6 +25,7 @@ pub struct Accounts {
     dir: PathBuf,
     credentials: Option<Credentials>,
     inner: Mutex<Inner>,
+    mutation: Mutex<()>,
     _lock: fs::File,
 }
 impl Accounts {
@@ -41,7 +42,8 @@ impl Accounts {
             .create(true)
             .truncate(false)
             .open(dir.join("celine.lock"))?;
-        fs2::FileExt::try_lock_exclusive(&lock)
+        lock.try_lock()
+            .map_err(std::io::Error::from)
             .inspect_err(|error| {
                 tracing::error!(io_kind = ?error.kind(), "Cannot acquire the data-directory lock");
             })
@@ -88,6 +90,7 @@ impl Accounts {
             dir,
             credentials,
             inner: Mutex::new(inner),
+            mutation: Mutex::new(()),
             _lock: lock,
         }))
     }
@@ -108,21 +111,34 @@ impl Accounts {
             .map(|account| (id.to_owned(), account.app.clone()))
     }
     pub async fn state(&self) -> serde_json::Value {
-        let inner = self.inner.lock().await;
-        let mut summaries = Vec::new();
-        let mut active = serde_json::Value::Null;
-        for (id, account) in &inner.accounts {
-            let mut state = serde_json::to_value(account.app.state().await).unwrap();
-            scope_media(&mut state, id);
-            summaries.push(
-                serde_json::json!({"id":id,"auth":state["auth"],"profile":state["profile"],
-                "pending": self.pending(id)}),
-            );
-            if id == &inner.registry.active_account_id {
-                active = state;
-            }
+        let (active_id, accounts) = {
+            let inner = self.inner.lock().await;
+            (
+                inner.registry.active_account_id.clone(),
+                inner
+                    .accounts
+                    .iter()
+                    .map(|(id, account)| (id.clone(), account.app.clone()))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let active_app = &accounts.iter().find(|(id, _)| id == &active_id).unwrap().1;
+        let mut active = serde_json::to_value(active_app.state().await).unwrap();
+        scope_media(&mut active, &active_id);
+        let mut summaries = Vec::with_capacity(accounts.len());
+        for (id, app) in accounts {
+            let mut summary = if id == active_id {
+                serde_json::json!({"id": id, "auth": active["auth"], "profile": active["profile"],
+                    "pending": self.pending(&id)})
+            } else {
+                let (auth, profile) = app.summary().await;
+                serde_json::json!({"id": id, "auth": auth, "profile": profile,
+                    "pending": self.pending(&id)})
+            };
+            scope_media(&mut summary, &id);
+            summaries.push(summary);
         }
-        active["active_account_id"] = inner.registry.active_account_id.clone().into();
+        active["active_account_id"] = active_id.into();
         active["accounts"] = summaries.into();
         active
     }
@@ -130,6 +146,7 @@ impl Accounts {
         !self.dir.join("accounts").join(id).join("identity").exists()
     }
     pub async fn create(&self) -> Result<()> {
+        let _mutation = self.mutation.lock().await;
         let mut inner = self.inner.lock().await;
         if inner.registry.accounts.iter().any(|id| self.pending(id)) {
             bail!(Message::new(
@@ -158,6 +175,7 @@ impl Accounts {
         Ok(())
     }
     pub async fn activate(&self, id: &str) -> Result<()> {
+        let _mutation = self.mutation.lock().await;
         let mut inner = self.inner.lock().await;
         if !inner.accounts.contains_key(id) {
             bail!(Message::new("account.not_found", "Account not found."));
@@ -172,20 +190,26 @@ impl Accounts {
         Ok(())
     }
     pub async fn remove(&self, id: &str) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        let account = inner
-            .accounts
-            .get(id)
-            .context(Message::new("account.not_found", "Account not found."))?;
-        let mut registry = Registry {
-            active_account_id: inner.registry.active_account_id.clone(),
-            accounts: inner
-                .registry
+        let _mutation = self.mutation.lock().await;
+        let (app, mut registry) = {
+            let inner = self.inner.lock().await;
+            let app = inner
                 .accounts
-                .iter()
-                .filter(|saved| saved.as_str() != id)
-                .cloned()
-                .collect(),
+                .get(id)
+                .context(Message::new("account.not_found", "Account not found."))?
+                .app
+                .clone();
+            let registry = Registry {
+                active_account_id: inner.registry.active_account_id.clone(),
+                accounts: inner
+                    .registry
+                    .accounts
+                    .iter()
+                    .filter(|saved| saved.as_str() != id)
+                    .cloned()
+                    .collect(),
+            };
+            (app, registry)
         };
         let replacement = if registry.accounts.is_empty() {
             let id = uuid::Uuid::new_v4().to_string();
@@ -201,17 +225,19 @@ impl Accounts {
         if registry.active_account_id == id {
             registry.active_account_id = registry.accounts[0].clone();
         }
-        account.app.logout().await?;
+        app.logout().await?;
+        let mut inner = self.inner.lock().await;
         Self::persist(&self.dir, &registry)?;
-        account.worker.abort();
-        account.app.disconnect().await;
-        inner.accounts.remove(id);
+        let removed = inner.accounts.remove(id).unwrap();
+        removed.worker.abort();
         tracing::info!(account_id = id, "Account removed");
         if let Some((id, app)) = replacement {
             let worker = spawn_worker(&id, &app);
             inner.accounts.insert(id, Account { app, worker });
         }
         inner.registry = registry;
+        drop(inner);
+        removed.app.disconnect().await;
         Ok(())
     }
 }
@@ -384,6 +410,38 @@ mod tests {
         )
         .unwrap();
         accounts.create().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn removing_one_account_does_not_block_other_account_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let accounts = Accounts::open(dir.path().into(), None).unwrap();
+        let (first, first_app) = accounts.app(None).await.unwrap();
+        fs::write(
+            dir.path().join("accounts").join(&first).join("identity"),
+            "123",
+        )
+        .unwrap();
+        accounts.create().await.unwrap();
+        let (second, _) = accounts.app(None).await.unwrap();
+        let connection = first_app.lock_telegram().await;
+        let removing = {
+            let accounts = accounts.clone();
+            let first = first.clone();
+            tokio::spawn(async move { accounts.remove(&first).await })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while accounts.mutation.try_lock().is_ok() {
+                tokio::task::yield_now().await;
+            }
+            assert!(accounts.app(Some(&second)).await.is_some());
+            assert_eq!(accounts.state().await["active_account_id"], second);
+        })
+        .await
+        .unwrap();
+        drop(connection);
+        removing.await.unwrap().unwrap();
+        assert!(accounts.app(Some(&first)).await.is_none());
     }
 
     #[tokio::test]
