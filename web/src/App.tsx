@@ -496,7 +496,7 @@ function AccountWorkspace(
                         class={[
                             "motion-safe:transition-[opacity,translate] motion-safe:duration-200 motion-safe:ease-out",
                             tab() === "photos"
-                                ? "relative opacity-100 translate-y-0"
+                                ? "relative opacity-100 translate-none"
                                 : "pointer-events-none invisible absolute inset-x-0 top-0 opacity-0 -translate-y-2",
                         ]}
                     >
@@ -538,7 +538,7 @@ function AccountWorkspace(
                         class={[
                             "motion-safe:transition-[opacity,translate] motion-safe:duration-200 motion-safe:ease-out",
                             tab() === "emojis"
-                                ? "relative opacity-100 translate-y-0"
+                                ? "relative opacity-100 translate-none"
                                 : "pointer-events-none invisible absolute inset-x-0 top-0 opacity-0 translate-y-2",
                         ]}
                     >
