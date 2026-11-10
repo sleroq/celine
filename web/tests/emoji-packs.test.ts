@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { flush } from "solid-js";
 import { accountApi } from "../src/api";
 import { createEmojiPacks } from "../src/emoji-packs";
+import { createEmojiPackCache } from "../src/emoji-pack-cache";
 
 const recent = {
     id: "100",
@@ -289,4 +290,30 @@ describe("emoji pack browsing", () => {
             "/api/accounts/account-a/emojis/sets/9223372036854775806",
         );
     });
+});
+
+test("shared named cache deduplicates, caches empty results, and retries failures", async () => {
+    let respond!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+        respond = resolve;
+    });
+    const fetch = spyOn(globalThis, "fetch")
+        .mockReturnValueOnce(pending)
+        .mockResolvedValueOnce(Response.json({ error: "Pack unavailable" }, { status: 503 }))
+        .mockResolvedValueOnce(Response.json({ choices: [leaf] }));
+    const cache = createEmojiPackCache(accountApi("account-a"));
+    const profile = cache.load("empty / pack");
+    const name = cache.load("empty / pack");
+    expect(cache.get("empty / pack")?.loading).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    respond(Response.json({ choices: [] }));
+    await Promise.all([profile, name]);
+    await cache.load("empty / pack");
+    expect(cache.get("empty / pack")?.choices).toEqual([]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await cache.load("failed");
+    expect(cache.get("failed")?.error).toBe("Pack unavailable");
+    await cache.load("failed");
+    expect(cache.get("failed")).toEqual({ choices: [leaf], loading: false, error: "" });
+    expect(fetch.mock.calls[0][0]).toBe("/api/accounts/account-a/emojis/sets/empty%20%2F%20pack");
 });

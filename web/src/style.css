@@ -617,19 +617,6 @@ input[aria-invalid="true"] {
 .sortable-item {
     position: relative;
 }
-.photo-current {
-    position: absolute;
-    inset-inline: 2px;
-    inset-block-end: 2px;
-    padding: 0.125rem;
-    border-radius: 0 0 0.375rem 0.375rem;
-    color: white;
-    background: #222d;
-    font-size: 0.625rem;
-    line-height: 1.2;
-    text-align: center;
-    pointer-events: none;
-}
 .sortable-handle {
     display: grid;
     place-items: center;
@@ -683,10 +670,9 @@ input[aria-invalid="true"] {
 .sortable-ghost {
     opacity: 0.35;
 }
-.sortable-remove {
+.sortable-remove,
+.sortable-edit {
     position: absolute;
-    inset-block-start: -4px;
-    inset-inline-end: -4px;
     display: grid;
     place-items: center;
     width: 24px;
@@ -700,7 +686,16 @@ input[aria-invalid="true"] {
     opacity: 0;
     pointer-events: none;
 }
-.sortable-remove svg {
+.sortable-remove {
+    inset-block-start: -4px;
+    inset-inline-end: -4px;
+}
+.sortable-edit {
+    inset-block-end: -4px;
+    inset-inline-start: -4px;
+}
+.sortable-remove svg,
+.sortable-edit svg {
     width: 14px;
     height: 14px;
     fill: none;
@@ -708,18 +703,26 @@ input[aria-invalid="true"] {
     stroke-width: 2;
     stroke-linecap: round;
 }
-.sortable-item:focus-within .sortable-remove {
+.sortable-edit svg {
+    stroke-linejoin: round;
+}
+.sortable-item:focus-within .sortable-remove,
+.sortable-item:focus-within .sortable-edit,
+.photo-preview:focus-within .photo-preview-edit {
     opacity: 1;
     pointer-events: auto;
 }
 @media (hover: hover) {
-    .sortable-item:hover .sortable-remove {
+    .sortable-item:hover .sortable-remove,
+    .sortable-item:hover .sortable-edit,
+    .photo-preview:hover .photo-preview-edit {
         opacity: 1;
         pointer-events: auto;
     }
 }
 @media (hover: none) {
-    .sortable-remove {
+    .sortable-remove,
+    .sortable-edit {
         opacity: 1;
         pointer-events: auto;
     }
@@ -842,54 +845,6 @@ input[type="number"] {
 .photo-choice:has(input:disabled) {
     cursor: default;
 }
-.photo-badge {
-    position: absolute;
-    inset-block-end: 3px;
-    inset-inline-end: 3px;
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
-    border-radius: 0.25rem;
-    background: color-mix(in srgb, Canvas 65%, transparent);
-    color: CanvasText;
-}
-.photo-badge svg {
-    width: 14px;
-    height: 14px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-.sortable-edit {
-    position: absolute;
-    inset-block-end: -4px;
-    inset-inline-start: -4px;
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    min-height: 0;
-    padding: 0;
-    border: 1px solid color-mix(in srgb, CanvasText 25%, Canvas);
-    border-radius: 50%;
-    color: CanvasText;
-    background: Canvas;
-    opacity: 0;
-    pointer-events: none;
-}
-.sortable-edit svg {
-    width: 14px;
-    height: 14px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
 @media (hover: hover) {
     .photo-icon-action:not(:disabled, [aria-disabled="true"]):hover {
         cursor: pointer;
@@ -927,22 +882,8 @@ input[type="number"] {
             rotateY(calc(var(--tilt-y, 0deg) * 0.55));
     }
 }
-.sortable-item:focus-within .sortable-edit,
-.photo-preview:focus-within .photo-preview-edit {
-    opacity: 1;
-    pointer-events: auto;
-}
-@media (hover: hover) {
-    .sortable-item:hover .sortable-edit,
-    .photo-preview:hover .photo-preview-edit {
-        opacity: 1;
-        pointer-events: auto;
-    }
-}
 @media (hover: none) {
     .sortable-edit {
-        opacity: 1;
-        pointer-events: auto;
         width: 44px;
         height: 44px;
     }
@@ -950,19 +891,6 @@ input[type="number"] {
         width: 26px;
         height: 26px;
     }
-}
-.crop-dialog {
-    width: min(36rem, calc(100vw - 2rem));
-    max-height: calc(100dvh - 2rem);
-    overflow: auto;
-    padding: 1.25rem;
-    border: 1px solid GrayText;
-    border-radius: 0.75rem;
-    color: CanvasText;
-    background: Canvas;
-}
-.crop-dialog::backdrop {
-    background: rgb(0 0 0 / 0.65);
 }
 .crop-stage {
     position: relative;

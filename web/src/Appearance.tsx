@@ -7,6 +7,7 @@ import {
     onCleanup,
     onSettled,
     Show,
+    snapshot,
     untrack,
 } from "solid-js";
 import type {
@@ -28,6 +29,8 @@ import { updateAppearanceSection } from "./appearance-editor";
 import { EmojiChoices } from "./EmojiPicker";
 import { DefaultEmojiGlyph } from "./default-emoji";
 import { profileBackground, replyAccent, swatchFill } from "./appearance-preview";
+import { createEmojiPackCache } from "./emoji-pack-cache";
+import { trackAutosave } from "./save-status";
 
 export const unchangedAppearance = (): Appearance => ({ profile: null, name: null });
 
@@ -40,6 +43,8 @@ export function AppearanceEditor(props: {
     avatarUrl?: string;
     catalog?: AppearanceCatalog;
 }) {
+    // The keyed account workspace keeps the account API stable for this editor.
+    const packs = untrack(() => createEmojiPackCache(props.api));
     const [catalog, setCatalog] = createSignal<AppearanceCatalog>();
     const [error, setError] = createSignal("");
     async function load() {
@@ -112,34 +117,13 @@ export function AppearanceEditor(props: {
                             const value = createMemo(() => props.value[section]);
                             const [choosing, setChoosing] = createSignal(false);
                             const [packId, setPackId] = createSignal("");
-                            const [choices, setChoices] = createSignal<EmojiChoice[]>(
-                                data().choices,
-                            );
-                            const [loading, setLoading] = createSignal(false);
-                            async function selectPack(id: string) {
-                                if (loading()) return;
+                            const selectedPack = () => (packId() ? packs.get(packId()) : undefined);
+                            const choices = () =>
+                                packId() ? (selectedPack()?.choices ?? []) : data().choices;
+                            const loading = () => selectedPack()?.loading ?? false;
+                            function selectPack(id: string) {
                                 setPackId(id);
-                                setError("");
-                                if (!id) {
-                                    setChoices(data().choices);
-                                    return;
-                                }
-                                setChoices([]);
-                                setLoading(true);
-                                try {
-                                    const result = await props.api.request(
-                                        `emojis/sets/${encodeURIComponent(id)}`,
-                                    );
-                                    setChoices(result.choices);
-                                } catch (failure) {
-                                    setError(
-                                        failure instanceof RequestError
-                                            ? failure.message
-                                            : t("requestFailed"),
-                                    );
-                                } finally {
-                                    setLoading(false);
-                                }
+                                if (id) void packs.load(id);
                             }
                             const edit = (next: AppearanceValue) => update(section, next);
 
@@ -358,6 +342,21 @@ export function AppearanceEditor(props: {
                                                     <Show when={loading()}>
                                                         <p role="status">{t("loadingEmoji")}</p>
                                                     </Show>
+                                                    <Show when={selectedPack()?.error}>
+                                                        {(message) => (
+                                                            <>
+                                                                <p role="alert">{message()}</p>
+                                                                <Button
+                                                                    variant="secondary"
+                                                                    onClick={() =>
+                                                                        void packs.load(packId())
+                                                                    }
+                                                                >
+                                                                    {t("retry")}
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </Show>
                                                     <EmojiChoices
                                                         active
                                                         choices={choices()}
@@ -521,9 +520,9 @@ export function AppearancePanel(props: {
         autosave.edit(next.map((entry) => entry.value));
     }
     const dirty = () => autosave.status() === "pending" || autosave.status() === "error";
-    createEffect(autosave.status, (status) =>
-        props.reportSave(status, () => void autosave.retry().catch(() => {})),
-    );
+    // trackAutosave invokes this callback from its effect and cleanup; it only calls the prop.
+    // oxlint-disable-next-line solid/reactivity
+    trackAutosave(autosave, (status, _valid, retry) => props.reportSave(status, retry));
     createEffect(
         () => [autosave.status(), autosave.draft(), props.state.appearance_presets] as const,
         ([status, draft, server]) => {
@@ -540,7 +539,6 @@ export function AppearancePanel(props: {
         },
     );
     onCleanup(autosave.dispose);
-    onCleanup(() => props.reportSave("idle", () => {}));
 
     const [catalog, setCatalog] = createSignal<AppearanceCatalog>();
     const [error, setError] = createSignal("");
@@ -627,7 +625,10 @@ export function AppearancePanel(props: {
                                 {
                                     id,
                                     value: structuredClone(
-                                        props.state.profile?.appearance ?? unchangedAppearance(),
+                                        snapshot(
+                                            props.state.profile?.appearance ??
+                                                unchangedAppearance(),
+                                        ),
                                     ),
                                 },
                             ]);

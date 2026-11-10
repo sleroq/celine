@@ -2,6 +2,7 @@ import { createSignal, createStore, reconcile, untrack } from "solid-js";
 import { RequestError } from "./api";
 import type { AccountApi, EmojiChoice, Emojis } from "./api";
 import { t } from "./i18n";
+import { createEmojiPackCache } from "./emoji-pack-cache";
 
 type Pack = { choices?: EmojiChoice[]; loading: boolean; error: string };
 
@@ -11,11 +12,16 @@ export function createEmojiPacks(api: AccountApi) {
         sets: Emojis["sets"];
         packs: Record<string, Pack | undefined>;
     }>({ sets: [], packs: {} });
+    const named = createEmojiPackCache(api);
+    const [ids, setIds] = createStore<Record<string, boolean>>({});
+    function pack(id: string) {
+        return id ? named.get(id) : catalog.packs[""];
+    }
     let indexedPacks: (EmojiChoice[] | undefined)[] = [];
     let choicesById = new Map<string, EmojiChoice>();
 
     function find(id: string) {
-        const packs = Object.values(catalog.packs).map((pack) => pack?.choices);
+        const packs = Object.keys(ids).map((id) => pack(id)?.choices);
         if (
             packs.length !== indexedPacks.length ||
             packs.some((choices, index) => choices !== indexedPacks[index])
@@ -37,15 +43,17 @@ export function createEmojiPacks(api: AccountApi) {
 
     async function select(id = activeId()) {
         setActiveId(id);
-        const cached = catalog.packs[id];
-        if (cached?.loading || (id && cached?.choices)) return;
+        setIds((draft) => {
+            draft[id] = true;
+        });
+        const cached = pack(id);
+        if (cached?.loading) return;
+        if (id) return named.load(id);
         setCatalog((draft) => {
             draft.packs[id] = { loading: true, error: "" };
         });
         try {
-            const result = id
-                ? await api.request(`emojis/sets/${encodeURIComponent(id)}`)
-                : await api.request("emojis");
+            const result = await api.request("emojis");
             setCatalog((draft) => {
                 if ("sets" in result) reconcile(result.sets, "id")(draft.sets);
                 draft.packs[id] = { choices: result.choices, loading: false, error: "" };
@@ -71,10 +79,10 @@ export function createEmojiPacks(api: AccountApi) {
             return activeId();
         },
         get active() {
-            return catalog.packs[activeId()];
+            return pack(activeId());
         },
         get groups() {
-            const choices = catalog.packs[activeId()]?.choices;
+            const choices = pack(activeId())?.choices;
             if (!choices) return [];
             if (activeId()) return [{ kind: "pack" as const, choices }];
             const collectibles = choices.filter((emoji) => emoji.source_kind === "collectible");

@@ -36,52 +36,91 @@ const initial: State = {
     next_rotation_at: null,
     current_photo_id: "a",
     last_error: null,
+    last_error_info: { code: "request_failed", params: {} },
 };
 
 createRoot((dispose) => {
     const [state, setState] = createAppState();
-    let evaluations = 0;
-    let observedValue: State | undefined;
-    function observed() {
-        return observedValue;
-    }
+    let photoEvaluations = 0;
+    let settingsEvaluations = 0;
+    let observedPhotos: State["photos"] | undefined;
     createEffect(
         () => {
-            evaluations++;
-            return state();
+            photoEvaluations++;
+            return state()?.photos;
         },
-        (value) => {
-            observedValue = value;
+        (photos) => {
+            observedPhotos = photos;
         },
     );
+    createEffect(
+        () => {
+            settingsEvaluations++;
+            return state()?.settings;
+        },
+        () => {},
+    );
     flush();
-    assert.equal(observed(), undefined);
+    assert.equal(state(), undefined);
     setState(initial);
     flush();
-    assert.equal(observed(), initial);
-    const loadedEvaluations = evaluations;
+    assert.deepEqual(state(), initial);
+    const accountState = state()!;
+    const loadedPhotos = photoEvaluations;
+    const loadedSettings = settingsEvaluations;
+    const photos = state()!.photos;
+    const secondPhoto = photos[1];
+    const account = state()!.accounts[0];
+    const selectedEmoji = state()!.selected_emojis[0];
+    const historyPhoto = state()!.photo_cache.photos[1];
 
     setState(structuredClone(initial));
     flush();
-    assert.equal(evaluations, loadedEvaluations);
-    assert.equal(observed(), initial);
-    assert.equal(state()?.photos[0], initial.photos[0]);
+    assert.equal(photoEvaluations, loadedPhotos);
+    assert.equal(settingsEvaluations, loadedSettings);
+    assert.equal(state()?.photos, photos);
 
-    // Retained server values must not change underneath local editor drafts.
-    const draft = { ...initial.settings, interval_secs: 120 };
-    const retainedPreset = initial.appearance_presets[0];
+    const unrelated = structuredClone(initial);
+    unrelated.last_error = "Connection failed";
+    setState(unrelated);
+    flush();
+    assert.equal(state()?.last_error, "Connection failed");
+    assert.equal(photoEvaluations, loadedPhotos);
+    assert.equal(settingsEvaluations, loadedSettings);
+    assert.equal(state()?.photos, photos);
+
+    // Replacing a field must not mutate server values retained by editor drafts.
+    const retainedSettings = state()!.settings;
+    const retainedPreset = state()!.appearance_presets[0];
+    const retainedPhoto = state()!.photos[0];
+    const draft = { ...retainedSettings, interval_secs: 120 };
     const changed = structuredClone(initial);
     changed.photos[0]!.name = "Updated";
     changed.settings.interval_secs = 90;
     changed.appearance_presets[0]!.profile!.color = 2;
     setState(changed);
     flush();
-    assert.equal(evaluations, loadedEvaluations + 1);
-    assert.equal(observed()?.photos[0]?.name, "Updated");
-    assert.equal(state()?.settings.interval_secs, 90);
-    assert.equal(initial.photos[0]?.name, "a");
+    assert.equal(photoEvaluations, loadedPhotos + 1);
+    assert.equal(settingsEvaluations, loadedSettings + 1);
+    assert.equal(state()?.photos[0]?.name, "Updated");
+    assert.equal(state(), accountState);
+    assert.equal(accountState.settings.interval_secs, 90);
+    assert.equal(retainedPhoto?.name, "a");
+    assert.equal(retainedSettings.interval_secs, 60);
     assert.equal(retainedPreset?.profile?.color, 1);
+    assert.equal(initial.photos[0]?.name, "a");
+    assert.equal(initial.settings.interval_secs, 60);
     assert.equal(draft.interval_secs, 120);
+    assert.equal(state()?.photos[1], secondPhoto);
+    assert.equal(state()?.accounts[0], account);
+    assert.equal(state()?.selected_emojis[0], selectedEmoji);
+
+    const reordered = structuredClone(changed);
+    reordered.photos.reverse();
+    setState(reordered);
+    flush();
+    assert.equal(state()?.photos[0], secondPhoto);
+    assert.equal(settingsEvaluations, loadedSettings + 1);
 
     const removed = structuredClone(changed);
     removed.photos.splice(0, 1);
@@ -90,28 +129,39 @@ createRoot((dispose) => {
     removed.selected_emojis = [];
     removed.appearance_presets = [];
     delete removed.auth.name;
+    delete removed.last_error_info;
     setState(removed);
     flush();
-    assert.equal(evaluations, loadedEvaluations + 2);
     assert.deepEqual(
-        observed()?.photos.map((photo) => photo.id),
+        observedPhotos?.map((photo) => photo.id),
         ["b"],
     );
-    assert.deepEqual(state()?.photo_cache.photos, [{ id: "b" }]);
+    assert.equal(state()?.photos[0], secondPhoto);
+    assert.equal(state()?.photo_cache.photos[0], historyPhoto);
     assert.deepEqual(state()?.selected_emoji_ids, []);
     assert.deepEqual(state()?.selected_emojis, []);
     assert.deepEqual(state()?.appearance_presets, []);
     assert.equal(state()?.auth.name, undefined);
+    assert.equal(Object.hasOwn(state()!, "last_error_info"), false);
 
     const switched = structuredClone(removed);
     switched.active_account_id = "work";
+    switched.settings.interval_secs = 300;
     setState(switched);
     flush();
-    assert.equal(evaluations, loadedEvaluations + 3);
-    assert.equal(observed()?.active_account_id, "work");
+    assert.notEqual(state(), accountState);
+    assert.equal(accountState.active_account_id, "personal");
+    assert.equal(accountState.settings.interval_secs, 90);
+    assert.equal(state()?.settings.interval_secs, 300);
+    assert.equal(state()?.active_account_id, "work");
+    assert.notEqual(state()?.photos[0], secondPhoto);
+    const switchedPhotos = photoEvaluations;
+    const switchedSettings = settingsEvaluations;
+    const switchedState = state();
     setState(structuredClone(switched));
     flush();
-    assert.equal(evaluations, loadedEvaluations + 3);
-    assert.equal(state(), switched);
+    assert.equal(photoEvaluations, switchedPhotos);
+    assert.equal(settingsEvaluations, switchedSettings);
+    assert.equal(state(), switchedState);
     dispose();
 });

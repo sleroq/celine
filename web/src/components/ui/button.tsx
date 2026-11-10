@@ -18,19 +18,13 @@ export const buttonVariants = cva({
     variants: {
         variant: {
             default: "bg-accent text-accent-foreground hover:brightness-90",
-            destructive: "bg-danger text-danger-foreground hover:brightness-90",
-            outline: "bg-transparent text-foreground hover:bg-muted-hover",
             secondary: "bg-muted text-foreground hover:bg-muted-hover",
             ghost: "bg-transparent text-foreground hover:bg-muted-hover",
-            link: "text-accent underline-offset-4 hover:underline",
         },
         size: {
             default: "px-3 py-2",
             sm: "px-2.5 py-2 text-sm",
-            lg: "min-h-11 px-6 py-2",
             icon: "size-10 p-0",
-            "icon-sm": "size-10 p-0 text-sm",
-            "icon-lg": "size-11 p-0",
         },
     },
     defaultVariants: {

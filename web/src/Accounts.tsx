@@ -10,6 +10,8 @@ export type Actions = {
     perform: (work: () => Promise<void>, message?: string, activity?: "reorder") => Promise<void>;
 };
 
+export type AccountActions = Actions & { api: AccountApi };
+
 export function AccountMenu(
     props: Actions & {
         accounts: AccountSummary[];

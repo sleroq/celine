@@ -65,7 +65,7 @@ type Props = {
 export function SortableList(props: Props) {
     const [announcement, setAnnouncement] = createSignal("");
     const [picked, setPicked] = createSignal<string>();
-    const ids = () => props.items.map((item) => item.id);
+    const ids = createMemo(() => props.items.map((item) => item.id));
     const itemsById = createMemo(() => new Map(props.items.map((item) => [item.id, item])));
     const hintId = () => `${props.kind}-reorder-hint`;
     let list!: HTMLOListElement;

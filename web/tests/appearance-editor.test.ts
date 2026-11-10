@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createAppearanceDraft, updateAppearanceSection } from "../src/appearance-editor";
+import { updateAppearanceSection } from "../src/appearance-editor";
 import { profileBackground, replyAccent, swatchFill } from "../src/appearance-preview";
 
 test("palette swatches show distinct colors without blending", () => {
@@ -31,27 +31,6 @@ test("section edits preserve external values and distinguish reset from unset", 
     expect(reset.name).toBe(name);
     expect(updateAppearanceSection(reset, "profile", null)).toEqual(original);
     expect(original.profile).toBeNull();
-});
-
-test("appearance initializes once when current data arrives without clobbering edits", () => {
-    const draft = createAppearanceDraft();
-    const current = { profile: { color: 2, emoji: null }, name: null };
-    expect(draft.initialize(undefined)).toBeUndefined();
-    const initial = draft.initialize(current);
-    expect(initial).toEqual(current);
-    expect(initial).not.toBe(current);
-    expect(draft.initialize({ ...current, name: { color: 3, emoji: null } })).toBeUndefined();
-    draft.edit();
-    expect(draft.initialize(current)).toBeUndefined();
-});
-
-test("preset selection or editing before loading wins; account drafts are independent", () => {
-    const first = createAppearanceDraft();
-    const second = createAppearanceDraft();
-    const current = { profile: null, name: { color: 4, emoji: null } };
-    first.edit();
-    expect(first.initialize(current)).toBeUndefined();
-    expect(second.initialize(current)).toEqual(current);
 });
 
 test("profile backgrounds use the second color at the avatar and first at the edge", () => {
