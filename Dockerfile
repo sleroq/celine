@@ -1,6 +1,6 @@
 FROM oven/bun:1.4.4 AS bun
 
-FROM rust:1.99.1-bookworm AS builder
+FROM rust:1.100.0-bookworm AS builder
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 COPY web/package.json web/bun.lock ./web/

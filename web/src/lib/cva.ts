@@ -1,9 +1,9 @@
 // Adapted from shadcn-solid (MIT): https://github.com/hngngn/shadcn-solid
-import { defineConfig } from "cva";
+import * as classes from "cva";
+import type { ClassValue } from "cva";
+import { defineConfig } from "cva/config";
 import { twMerge } from "tailwind-merge";
 
 export const { cva, cx } = defineConfig({
-    hooks: {
-        onComplete: (className) => twMerge(className),
-    },
+    cx: (...inputs: ClassValue[]) => twMerge(classes.cx(...inputs)),
 });

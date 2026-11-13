@@ -7,19 +7,19 @@ rust-version = "1.99"
 
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 axum = { version = "0.8", features = ["multipart"] }
 directories = "6"
-grammers-client = "=0.11.0"
-grammers-mtsender = "=0.11.0"
-grammers-session = "=0.11.0"
-grammers-tl-types = "=0.11.0"
+grammers-client = "=0.12.0"
+grammers-mtsender = "=0.12.0"
+grammers-session = "=0.12.0"
+grammers-tl-types = "=0.12.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 include_dir = "0.7"
 mime_guess = "2"
 open = "5"
-rand = "0.9"
+rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"

@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 
 use crate::telegram::EmojiChoice;
 use anyhow::{Context, Result, bail};
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
