@@ -1,10 +1,9 @@
 import { createSignal, onCleanup, onSettled, Show, untrack } from "solid-js";
 import Cropper from "cropperjs";
-import "cropperjs/dist/cropper.css";
 import type { AccountApi, Crop, Photo } from "./api";
 import { RequestError } from "./api";
 import { Button } from "./components/ui";
-import { centeredCrop, cropFromPixels, cropToPixels } from "./crop";
+import { centeredCrop, cropFromPixels, cropToPixels, type CropPixels } from "./crop";
 import { t } from "./i18n";
 
 export function CropEditor(props: {
@@ -18,21 +17,61 @@ export function CropEditor(props: {
     let image!: HTMLImageElement;
     let cropper: Cropper | undefined;
     let resetting = false;
+    let disposed = false;
+    let resizeObserver: ResizeObserver | undefined;
     // Seed the editing draft once; server refreshes must not overwrite an in-progress crop.
     const [crop, setCrop] = createSignal<Crop | null>(untrack(() => props.photo.crop));
-    const [dimensions, setDimensions] = createSignal({ width: 1, height: 1 });
+    let dimensions = { width: 1, height: 1 };
     const [ready, setReady] = createSignal(false);
     const [error, setError] = createSignal("");
 
-    function apply(value: Crop | null, imageDimensions = dimensions()) {
+    function apply(value: Crop | null) {
+        const canvas = cropper!.getCropperCanvas()!;
+        const image = cropper!.getCropperImage()!;
+        if (value === null) {
+            resetting = true;
+            image.$center("contain");
+            resetting = false;
+        }
+        const selection = cropper!.getCropperSelection()!;
+        const canvasRect = canvas.getBoundingClientRect();
+        const imageRect = image.$image.getBoundingClientRect();
+        const pixels = cropToPixels(value ?? centeredCrop(dimensions), dimensions);
+        const scale = imageRect.width / dimensions.width;
         resetting = true;
-        cropper?.setData(cropToPixels(value ?? centeredCrop(imageDimensions), imageDimensions));
+        selection.$change(
+            imageRect.left - canvasRect.left + pixels.x * scale,
+            imageRect.top - canvasRect.top + pixels.y * scale,
+            pixels.width * scale,
+            pixels.height * scale,
+        );
         resetting = false;
         setCrop(value);
     }
+    function normalized(selection: CropPixels, imageRect: CropPixels) {
+        const scale = dimensions.width / imageRect.width;
+        return cropFromPixels(
+            {
+                x: (selection.x - imageRect.x) * scale,
+                y: (selection.y - imageRect.y) * scale,
+                width: selection.width * scale,
+                height: selection.height * scale,
+            },
+            dimensions,
+        );
+    }
+    function contains(image: CropPixels, selection: CropPixels) {
+        const epsilon = 0.01;
+        return (
+            selection.x >= image.x - epsilon &&
+            selection.y >= image.y - epsilon &&
+            selection.x + selection.width <= image.x + image.width + epsilon &&
+            selection.y + selection.height <= image.y + image.height + epsilon
+        );
+    }
     async function save() {
         props.setSaving(true);
-        cropper?.disable();
+        if (cropper) cropper.getCropperCanvas()!.disabled = true;
         setError("");
         try {
             await props.api.saveCrop(props.photo.id, crop());
@@ -41,32 +80,129 @@ export function CropEditor(props: {
         } catch (failure) {
             setError(failure instanceof RequestError ? failure.message : t("cropSaveError"));
         } finally {
-            cropper?.enable();
+            if (cropper) cropper.getCropperCanvas()!.disabled = false;
             props.setSaving(false);
         }
     }
     onSettled(() => {
         cropper = new Cropper(image, {
-            aspectRatio: 1,
-            viewMode: 1,
-            autoCropArea: 1,
-            responsive: true,
-            background: false,
-            modal: false,
-            ready() {
-                const data = cropper!.getCanvasData();
-                const imageDimensions = { width: data.naturalWidth, height: data.naturalHeight };
-                setDimensions(imageDimensions);
-                apply(props.photo.crop, imageDimensions);
-                setReady(true);
-            },
-            crop(event) {
-                if (!ready() || resetting) return;
-                setCrop(cropFromPixels(event.detail, dimensions()));
-            },
+            template: `<cropper-canvas>
+                <cropper-image initial-fit="contain" translatable scalable></cropper-image>
+                <cropper-shade border-radius="50%"></cropper-shade>
+                <cropper-handle action="move" plain></cropper-handle>
+                <cropper-selection aspect-ratio="1" border-radius="50%" movable resizable precise>
+                    <cropper-handle action="move" plain></cropper-handle>
+                    <cropper-handle action="n-resize"></cropper-handle>
+                    <cropper-handle action="e-resize"></cropper-handle>
+                    <cropper-handle action="s-resize"></cropper-handle>
+                    <cropper-handle action="w-resize"></cropper-handle>
+                    <cropper-handle action="ne-resize"></cropper-handle>
+                    <cropper-handle action="nw-resize"></cropper-handle>
+                    <cropper-handle action="se-resize"></cropper-handle>
+                    <cropper-handle action="sw-resize"></cropper-handle>
+                </cropper-selection>
+            </cropper-canvas>`,
         });
+
+        const canvas = cropper.getCropperCanvas()!;
+        const cropImage = cropper.getCropperImage()!;
+        const selection = cropper.getCropperSelection()!;
+        function imageBounds(): CropPixels {
+            const rect = cropImage.$image.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            return {
+                x: rect.left - canvasRect.left,
+                y: rect.top - canvasRect.top,
+                width: rect.width,
+                height: rect.height,
+            };
+        }
+        selection.addEventListener("change", (event) => {
+            if (!ready() || resetting) return;
+            // SAFETY: Cropper selection emits its rectangle in the change event detail.
+            const next = (event as CustomEvent<CropPixels>).detail;
+            const bounds = imageBounds();
+            if (!contains(bounds, next)) event.preventDefault();
+            else setCrop(normalized(next, bounds));
+        });
+        cropImage.addEventListener("transform", (event) => {
+            if (!ready() || resetting) return;
+            // SAFETY: Cropper image emits the proposed matrix in the transform event detail.
+            const { matrix } = (event as CustomEvent<{ matrix: number[] }>).detail;
+            const previous = cropImage.style.transform;
+            cropImage.style.transform = `matrix(${matrix.join(", ")})`;
+            const bounds = imageBounds();
+            cropImage.style.transform = previous;
+            if (!contains(bounds, selection)) {
+                event.preventDefault();
+                const current = cropImage.$getTransform();
+                if (matrix.slice(0, 4).every((value, index) => value === current[index])) {
+                    const x = Math.min(
+                        selection.x - bounds.x,
+                        Math.max(0, selection.x + selection.width - bounds.x - bounds.width),
+                    );
+                    const y = Math.min(
+                        selection.y - bounds.y,
+                        Math.max(0, selection.y + selection.height - bounds.y - bounds.height),
+                    );
+                    matrix[4]! += x;
+                    matrix[5]! += y;
+                    resetting = true;
+                    cropImage.$setTransform(matrix);
+                    resetting = false;
+                    setCrop(normalized(selection, imageBounds()));
+                }
+                return;
+            }
+            queueMicrotask(() => {
+                if (!disposed) setCrop(normalized(selection, imageBounds()));
+            });
+        });
+        void cropImage
+            .$ready()
+            .then((loaded) => {
+                if (disposed) return;
+                dimensions = { width: loaded.naturalWidth, height: loaded.naturalHeight };
+                cropImage.$center("contain");
+                apply(crop());
+                setReady(true);
+                let canvasSize = { width: canvas.clientWidth, height: canvas.clientHeight };
+                resizeObserver = new ResizeObserver(() => {
+                    const next = { width: canvas.clientWidth, height: canvas.clientHeight };
+                    if (next.width === canvasSize.width && next.height === canvasSize.height)
+                        return;
+                    const bounds = imageBounds();
+                    const fit = (size: typeof canvasSize) =>
+                        Math.min(size.width / dimensions.width, size.height / dimensions.height);
+                    const scale = fit(next) / fit(canvasSize);
+                    const x =
+                        next.width / 2 +
+                        (bounds.x + bounds.width / 2 - canvasSize.width / 2) * scale;
+                    const y =
+                        next.height / 2 +
+                        (bounds.y + bounds.height / 2 - canvasSize.height / 2) * scale;
+                    resetting = true;
+                    cropImage.$scale(scale);
+                    const scaled = imageBounds();
+                    cropImage.$move(
+                        x - scaled.x - scaled.width / 2,
+                        y - scaled.y - scaled.height / 2,
+                    );
+                    resetting = false;
+                    canvasSize = next;
+                    apply(crop());
+                });
+                resizeObserver.observe(canvas);
+            })
+            .catch(() => {
+                if (!disposed) setError(t("cropLoadError"));
+            });
     });
-    onCleanup(() => cropper?.destroy());
+    onCleanup(() => {
+        disposed = true;
+        resizeObserver?.disconnect();
+        cropper?.destroy();
+    });
 
     return (
         <>
