@@ -649,11 +649,15 @@ input[aria-invalid="true"] {
 .sortable-handle[aria-disabled="true"] {
     cursor: default;
 }
-.sortable-handle img {
+.sortable-handle img,
+.sortable-list-photo .sortable-handle video {
     display: block;
     width: 100%;
     height: 100%;
     object-fit: cover;
+}
+.sortable-list-photo .sortable-handle video {
+    pointer-events: none;
 }
 .sortable-list-emoji .sortable-handle img {
     width: 32px;
@@ -708,7 +712,7 @@ input[aria-invalid="true"] {
 }
 .sortable-item:focus-within .sortable-remove,
 .sortable-item:focus-within .sortable-edit,
-.photo-preview:focus-within .photo-preview-edit {
+.photo-preview-edit:focus-visible {
     opacity: 1;
     pointer-events: auto;
 }
@@ -921,9 +925,9 @@ input[type="number"] {
     width: 44px;
     height: 44px;
 }
-.photo-preview-with-video .photo-preview-edit {
-    inset-block-start: 12px;
-    inset-block-end: auto;
+.photo-preview-playback {
+    inset-inline-start: auto;
+    inset-inline-end: 12px;
 }
 .photo-preview-edit svg {
     width: 26px;

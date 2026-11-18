@@ -60,6 +60,8 @@ export function PhotoDialog(props: {
     }
     const [loaded, setLoaded] = createSignal(false);
     const [error, setError] = createSignal(false);
+    const [playing, setPlaying] = createSignal(false);
+    let video!: HTMLVideoElement;
     const [dimensions, setDimensions] = createSignal({ width: 1, height: 1 });
     const imageStyle = () => {
         const { width, height } = dimensions();
@@ -92,6 +94,10 @@ export function PhotoDialog(props: {
             </button>
         );
     }
+    function togglePlayback() {
+        if (video.paused) void video.play().catch(() => setError(true));
+        else video.pause();
+    }
     function dismiss() {
         if (saving()) return;
         if (editing()) setEditing(false);
@@ -114,19 +120,51 @@ export function PhotoDialog(props: {
                             when={!props.photo.video}
                             fallback={
                                 <>
-                                    <div class="crop-stage photo-preview photo-preview-with-video">
+                                    <div class="crop-stage photo-preview">
                                         <video
+                                            ref={(element) => {
+                                                video = element;
+                                            }}
                                             class="photo-preview-video"
                                             src={props.api.photoVideoUrl(props.photo)}
                                             poster={props.api.selectedPhotoUrl(props.photo)}
                                             aria-label={photoDisplayName(props.photo)}
-                                            controls
+                                            tabindex="-1"
+                                            autofocus
+                                            autoplay={
+                                                matchMedia(
+                                                    "(prefers-reduced-motion: no-preference)",
+                                                ).matches
+                                            }
+                                            loop
                                             muted
                                             playsinline
-                                            onLoadStart={() => setError(false)}
+                                            onLoadStart={() => {
+                                                setError(false);
+                                                setPlaying(false);
+                                            }}
+                                            onPlay={() => setPlaying(true)}
+                                            onPause={() => setPlaying(false)}
                                             onError={() => setError(true)}
                                         />
                                         <CropAction />
+                                        <button
+                                            type="button"
+                                            class="sortable-edit photo-preview-edit photo-preview-playback photo-icon-action shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                                            aria-label={t(playing() ? "pauseVideo" : "playVideo")}
+                                            disabled={error()}
+                                            onClick={togglePlayback}
+                                        >
+                                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                                                <path
+                                                    d={
+                                                        playing()
+                                                            ? "M9 5v14m6-14v14"
+                                                            : "m9 5 10 7-10 7z"
+                                                    }
+                                                />
+                                            </svg>
+                                        </button>
                                     </div>
                                     <Show when={error()}>
                                         <p role="alert">{t("videoLoadError")}</p>

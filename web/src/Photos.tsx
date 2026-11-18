@@ -14,6 +14,7 @@ type Notify = (message: string, action?: () => void) => void;
 
 export function Photos(
     props: AccountActions & {
+        active: boolean;
         premium: boolean;
         notify: Notify;
         photos: State["photos"];
@@ -168,6 +169,7 @@ export function Photos(
             <SortableList
                 kind="photo"
                 busy={props.busy}
+                mediaActive={props.active && !photoDialog()}
                 reorder={reorder}
                 items={photos().map((photo, index) => {
                     const badge = photoMatchMessage(photo, props.photoCache);
@@ -175,6 +177,7 @@ export function Photos(
                         id: photo.id,
                         label: photoDisplayName(photo),
                         imageUrl: props.api.selectedPhotoUrl(photo),
+                        videoUrl: photo.video ? props.api.photoVideoUrl(photo) : undefined,
                         reorderLabel: photo.generated_name ? t("reorderTelegramPhoto") : undefined,
                         removeLabel: photo.generated_name ? t("removeTelegramPhoto") : undefined,
                         badge,

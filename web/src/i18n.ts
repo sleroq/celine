@@ -65,6 +65,8 @@ const en = {
     cropLoading: "Loading original photo…",
     cropLoadError: "Could not load the original photo.",
     videoLoadError: "Could not play this video.",
+    playVideo: "Play video",
+    pauseVideo: "Pause video",
     cropSaveError: "Could not save the crop.",
 
     cannotReachCeline: "Cannot reach Celine.",
@@ -245,6 +247,8 @@ const ru: Catalog = {
     cropLoading: "Загружаем оригинал фото…",
     cropLoadError: "Не удалось загрузить оригинал фото.",
     videoLoadError: "Не удалось воспроизвести видео.",
+    playVideo: "Воспроизвести видео",
+    pauseVideo: "Приостановить видео",
     cropSaveError: "Не удалось сохранить обрезку.",
 
     cannotReachCeline: "Не удалось подключиться к Celine.",
@@ -424,6 +428,8 @@ const uk: Catalog = {
     cropLoading: "Завантажуємо оригінал фото…",
     cropLoadError: "Не вдалося завантажити оригінал фото.",
     videoLoadError: "Не вдалося відтворити відео.",
+    playVideo: "Відтворити відео",
+    pauseVideo: "Призупинити відео",
     cropSaveError: "Не вдалося зберегти обрізання.",
 
     cannotReachCeline: "Не вдалося підключитися до Celine.",

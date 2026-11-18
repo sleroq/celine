@@ -34,6 +34,7 @@ type Item = {
     id: string;
     label: string;
     imageUrl?: string;
+    videoUrl?: string;
     badge?: keyof typeof photoStatusIcons;
     badgeActionLabel?: string;
     mediaUrl?: string;
@@ -61,6 +62,31 @@ type Props = {
     editStatus?: (id: string, button: HTMLButtonElement) => void;
     preview?: (id: string, button: HTMLButtonElement) => void;
 };
+
+function PhotoCardVideo(props: { url: string; poster: string }) {
+    let video!: HTMLVideoElement;
+    const [visible, setVisible] = createSignal(false);
+    onSettled(() => {
+        const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+        observer.observe(video);
+        return () => observer.disconnect();
+    });
+    return (
+        <video
+            ref={(element) => {
+                video = element;
+            }}
+            src={visible() ? props.url : undefined}
+            poster={props.poster}
+            aria-hidden="true"
+            autoplay
+            loop
+            muted
+            playsinline
+            draggable="false"
+        />
+    );
+}
 
 export function SortableList(props: Props) {
     const [announcement, setAnnouncement] = createSignal("");
@@ -271,12 +297,33 @@ export function SortableList(props: Props) {
                                                                     }
                                                                 >
                                                                     {(url) => (
-                                                                        <img
-                                                                            src={url()}
-                                                                            alt=""
-                                                                            loading="lazy"
-                                                                            draggable="false"
-                                                                        />
+                                                                        <Show
+                                                                            when={
+                                                                                props.mediaActive !==
+                                                                                    false &&
+                                                                                matchMedia(
+                                                                                    "(prefers-reduced-motion: no-preference)",
+                                                                                ).matches
+                                                                                    ? item()
+                                                                                          .videoUrl
+                                                                                    : undefined
+                                                                            }
+                                                                            fallback={
+                                                                                <img
+                                                                                    src={url()}
+                                                                                    alt=""
+                                                                                    loading="lazy"
+                                                                                    draggable="false"
+                                                                                />
+                                                                            }
+                                                                        >
+                                                                            {(video) => (
+                                                                                <PhotoCardVideo
+                                                                                    url={video()}
+                                                                                    poster={url()}
+                                                                                />
+                                                                            )}
+                                                                        </Show>
                                                                     )}
                                                                 </Show>
                                                             }

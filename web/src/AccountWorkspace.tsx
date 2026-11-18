@@ -215,6 +215,7 @@ export function AccountWorkspace(
                         ]}
                     >
                         <Photos
+                            active={tab() === "photos"}
                             profile={props.state.profile}
                             premium={premium()}
                             api={props.api}
