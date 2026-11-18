@@ -2,6 +2,8 @@
   lib,
   stdenvNoCC,
   bun,
+  ffmpeg,
+  makeWrapper,
   rustPlatform,
   # Optional build-time credentials are readable in the binary and Nix store.
   apiId ? null,
@@ -54,7 +56,13 @@ rustPlatform.buildRustPackage {
     ];
   };
   cargoLock.lockFile = ../Cargo.lock;
-  nativeBuildInputs = [ bun ];
+  nativeBuildInputs = [
+    bun
+    makeWrapper
+  ];
+  postInstall = ''
+    wrapProgram "$out/bin/celine" --prefix PATH : ${lib.makeBinPath [ ffmpeg ]}
+  '';
   env =
     lib.optionalAttrs (apiId != null) { CELINE_API_ID = toString apiId; }
     // lib.optionalAttrs (apiHash != null) { CELINE_API_HASH = apiHash; };

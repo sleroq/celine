@@ -69,6 +69,7 @@
             packages = [
               (toolchainFor pkgs)
               pkgs.bun
+              pkgs.ffmpeg
             ];
           };
         }

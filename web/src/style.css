@@ -910,11 +910,20 @@ input[type="number"] {
     aspect-ratio: 1;
     margin: -1.25rem -1.25rem 0;
 }
+.photo-preview-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
 .photo-preview-edit {
     inset-block-end: 12px;
     inset-inline-start: 12px;
     width: 44px;
     height: 44px;
+}
+.photo-preview-with-video .photo-preview-edit {
+    inset-block-start: 12px;
+    inset-block-end: auto;
 }
 .photo-preview-edit svg {
     width: 26px;

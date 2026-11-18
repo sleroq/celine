@@ -6,6 +6,7 @@ mod logging;
 mod messages;
 mod photo_cache;
 mod photo_match;
+mod profile_video;
 mod telegram;
 
 use std::path::PathBuf;

@@ -12,7 +12,7 @@ RUN cargo build --release --locked
 
 FROM debian:bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libgcc-s1 \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgcc-s1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 10001 --create-home celine \
     && mkdir -m 700 /data \

@@ -86,6 +86,8 @@ pub struct Photo {
     #[serde(default)]
     pub generated_name: Option<bool>,
     #[serde(default)]
+    pub video: bool,
+    #[serde(default)]
     pub telegram_id: Option<String>,
     // Unchecked photos must be matched against a fresh history before upload.
     #[serde(default)]
@@ -104,6 +106,30 @@ pub struct Crop {
     pub x: f64,
     pub y: f64,
     pub size: f64,
+}
+
+impl Crop {
+    pub fn pixels(&self, width: u32, height: u32) -> Result<(u32, u32, u32)> {
+        let side = self.size * f64::from(width.min(height));
+        let x = self.x * f64::from(width);
+        let y = self.y * f64::from(height);
+        if !x.is_finite()
+            || !y.is_finite()
+            || !side.is_finite()
+            || x < 0.0
+            || y < 0.0
+            || side < 1.0
+            || x + side > f64::from(width) + 0.00001
+            || y + side > f64::from(height) + 0.00001
+        {
+            bail!(Message::new(
+                "validation.crop",
+                "Choose a square crop within the image."
+            ));
+        }
+        let (x, y) = (x.round() as u32, y.round() as u32);
+        Ok((x, y, (side.round() as u32).min(width - x).min(height - y)))
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -486,18 +512,28 @@ impl Repository {
         }
         Ok(self.dir.join("photos").join(format!("{id}.jpg")))
     }
+    pub fn video_path(&self, id: &str) -> PathBuf {
+        self.dir.join("photos").join(format!("{id}.mp4"))
+    }
+
     pub fn original_path(&self, id: &str) -> Result<PathBuf> {
         self.photo_path(id)?;
         Ok(self.dir.join("photos").join(format!("{id}.original")))
     }
 
     pub fn original(&self, id: &str) -> Result<Vec<u8>> {
-        let original = self.original_path(id)?;
-        match fs::read(original) {
+        self.read_original(id, self.photo_path(id)?)
+    }
+
+    pub fn video_original(&self, id: &str) -> Result<Vec<u8>> {
+        // Videos imported before manual cropping only have the rendered MP4.
+        self.read_original(id, self.video_path(id))
+    }
+
+    fn read_original(&self, id: &str, fallback: PathBuf) -> Result<Vec<u8>> {
+        match fs::read(self.original_path(id)?) {
             Ok(bytes) => Ok(bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(fs::read(self.photo_path(id)?)?)
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(fs::read(fallback)?),
             Err(error) => Err(error.into()),
         }
     }
@@ -505,6 +541,21 @@ impl Repository {
     pub fn prepare_photo_reupload(&mut self, id: &str, cached: Option<&[u8]>) -> Result<()> {
         let result = (|| -> Result<()> {
             let path = self.photo_path(id)?;
+            if self
+                .data
+                .photos
+                .iter()
+                .any(|photo| photo.id == id && photo.video)
+            {
+                anyhow::ensure!(
+                    self.video_path(id).is_file(),
+                    Message::new(
+                        "photo.recovery_unavailable",
+                        "This photo cannot be prepared for upload. Its bytes are missing or it can already be reused from history."
+                    )
+                );
+                return self.clear_photo_link(id);
+            }
             let local = match fs::read(&path) {
                 Ok(bytes) => Some(bytes),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -529,16 +580,7 @@ impl Repository {
                 preview.persist(&path)?;
                 true
             };
-            if let Err(error) = self.update(|library| {
-                let photo = library
-                    .photos
-                    .iter_mut()
-                    .find(|photo| photo.id == id)
-                    .context("Photo not found")?;
-                photo.telegram_id = None;
-                photo.history_checked = true;
-                Ok(())
-            }) {
+            if let Err(error) = self.clear_photo_link(id) {
                 if materialized {
                     if let Some(bytes) = local {
                         let mut preview = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
@@ -564,70 +606,69 @@ impl Repository {
         })
     }
 
-    pub fn save_crop(&mut self, id: &str, crop: Option<Crop>, original: &[u8]) -> Result<()> {
-        let old = self
-            .data
-            .photos
-            .iter()
-            .find(|photo| photo.id == id)
-            .context("Photo not found")?;
-        if old.crop == crop {
-            return Ok(());
-        }
-        let jpeg = render_photo(original, crop.as_ref())?;
-        let original_path = self.original_path(id)?;
-        let path = self.photo_path(id)?;
-        let photos = path.parent().unwrap();
-        let mut preview = tempfile::NamedTempFile::new_in(photos)?;
-        std::io::Write::write_all(&mut preview, &jpeg)?;
-        let previous = match fs::read(&path) {
-            Ok(bytes) => {
-                let mut backup = tempfile::NamedTempFile::new_in(photos)?;
-                std::io::Write::write_all(&mut backup, &bytes)?;
-                Some(backup)
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        };
-        let stored_original = if original_path.exists() {
-            false
-        } else {
-            let mut file = tempfile::NamedTempFile::new_in(photos)?;
-            std::io::Write::write_all(&mut file, original)?;
-            file.persist(&original_path)?;
-            true
-        };
-        if let Err(error) = preview.persist(&path) {
-            if stored_original {
-                fs::remove_file(&original_path)?;
-            }
-            return Err(error.into());
-        }
-        if let Err(error) = self.update(|library| {
+    fn clear_photo_link(&mut self, id: &str) -> Result<()> {
+        self.update(|library| {
             let photo = library
                 .photos
                 .iter_mut()
                 .find(|photo| photo.id == id)
-                .unwrap();
-            photo.crop = crop;
+                .context("Photo not found")?;
             photo.telegram_id = None;
-            photo.history_checked = false;
+            photo.history_checked = true;
             Ok(())
-        }) {
-            match previous {
-                Some(backup) => {
-                    backup
-                        .persist(&path)
-                        .context("Cannot restore the previous photo preview")?;
-                }
-                None => fs::remove_file(&path).context("Cannot remove the failed photo preview")?,
-            }
-            if stored_original {
-                fs::remove_file(original_path)?;
-            }
-            return Err(error);
+        })
+    }
+
+    pub fn save_crop(&mut self, id: &str, crop: Option<Crop>, original: &[u8]) -> Result<()> {
+        let jpeg = render_photo(original, crop.as_ref())?;
+        self.commit_crop(id, crop, original, &jpeg, None)
+    }
+
+    pub fn save_video_crop(
+        &mut self,
+        id: &str,
+        crop: Option<Crop>,
+        original: &[u8],
+        video: &[u8],
+        poster: &[u8],
+    ) -> Result<()> {
+        self.commit_crop(id, crop, original, poster, Some(video))
+    }
+
+    fn commit_crop(
+        &mut self,
+        id: &str,
+        crop: Option<Crop>,
+        original: &[u8],
+        jpeg: &[u8],
+        video: Option<&[u8]>,
+    ) -> Result<()> {
+        let index = self
+            .data
+            .photos
+            .iter()
+            .position(|photo| photo.id == id)
+            .context("Photo not found")?;
+        if self.data.photos[index].crop == crop {
+            return Ok(());
         }
-        Ok(())
+        let original_path = self.original_path(id)?;
+        let mut files = vec![(self.photo_path(id)?, jpeg)];
+        if let Some(bytes) = video {
+            files.push((self.video_path(id), bytes));
+        }
+        if !original_path.exists() {
+            files.push((original_path, original));
+        }
+        save_media(files, || {
+            self.update(|library| {
+                let photo = &mut library.photos[index];
+                photo.crop = crop;
+                photo.telegram_id = None;
+                photo.history_checked = photo.video;
+                Ok(())
+            })
+        })
     }
 
     pub fn add_upload(
@@ -638,6 +679,28 @@ impl Repository {
         telegram_id: Option<String>,
         history_checked: bool,
     ) -> Result<()> {
+        self.store_upload(name, original, jpeg, telegram_id, history_checked, None)
+    }
+
+    pub fn add_video(
+        &mut self,
+        name: &str,
+        original: &[u8],
+        video: &[u8],
+        poster: &[u8],
+    ) -> Result<()> {
+        self.store_upload(name, original, poster, None, true, Some(video))
+    }
+
+    fn store_upload(
+        &mut self,
+        name: &str,
+        original: &[u8],
+        jpeg: &[u8],
+        telegram_id: Option<String>,
+        history_checked: bool,
+        video: Option<&[u8]>,
+    ) -> Result<()> {
         let telegram_available = telegram_id.as_ref().is_some_and(|id| {
             !self
                 .data
@@ -645,8 +708,18 @@ impl Repository {
                 .iter()
                 .any(|photo| photo.telegram_id.as_ref() == Some(id))
         });
-        for photo in &self.data.photos {
-            match self.original(&photo.id) {
+        for photo in self
+            .data
+            .photos
+            .iter()
+            .filter(|photo| photo.video == video.is_some())
+        {
+            let existing = if photo.video {
+                self.video_original(&photo.id)
+            } else {
+                self.original(&photo.id)
+            };
+            match existing {
                 Ok(existing) if existing == original => {
                     if photo.telegram_id.is_none() && photo.crop.is_none() && telegram_available {
                         let id = photo.id.clone();
@@ -666,6 +739,7 @@ impl Repository {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.chars().filter(|c| !c.is_control()).take(120).collect(),
             generated_name: Some(false),
+            video: video.is_some(),
             telegram_id: if telegram_available {
                 telegram_id
             } else {
@@ -677,26 +751,19 @@ impl Repository {
             appearance: Appearance::default(),
         };
         let photos = self.dir.join("photos");
-        let original_path = photos.join(format!("{}.original", photo.id));
-        let preview_path = photos.join(format!("{}.jpg", photo.id));
-        let mut original_file = tempfile::NamedTempFile::new_in(&photos)?;
-        std::io::Write::write_all(&mut original_file, original)?;
-        let mut preview_file = tempfile::NamedTempFile::new_in(&photos)?;
-        std::io::Write::write_all(&mut preview_file, jpeg)?;
-        original_file.persist(&original_path)?;
-        if let Err(error) = preview_file.persist(&preview_path) {
-            fs::remove_file(&original_path)?;
-            return Err(error.into());
+        let mut files = vec![
+            (photos.join(format!("{}.original", photo.id)), original),
+            (photos.join(format!("{}.jpg", photo.id)), jpeg),
+        ];
+        if let Some(bytes) = video {
+            files.push((self.video_path(&photo.id), bytes));
         }
-        if let Err(error) = self.update(|library| {
-            library.photos.push(photo);
-            Ok(())
-        }) {
-            fs::remove_file(&preview_path)?;
-            fs::remove_file(&original_path)?;
-            return Err(error);
-        }
-        Ok(())
+        save_media(files, || {
+            self.update(|library| {
+                library.photos.push(photo);
+                Ok(())
+            })
+        })
     }
     pub fn update(&mut self, change: impl FnOnce(&mut Library) -> Result<()>) -> Result<()> {
         let mut next = self.data.clone();
@@ -847,6 +914,7 @@ impl Repository {
                 id: uuid::Uuid::new_v4().to_string(),
                 name: "Telegram photo".into(),
                 generated_name: Some(true),
+                video: false,
                 telegram_id: Some(telegram_id),
                 history_checked: true,
                 crop: None,
@@ -883,6 +951,7 @@ impl Repository {
         })?;
         let original = self.dir.join("photos").join(format!("{id}.original"));
         let _ = fs::remove_file(original);
+        let _ = fs::remove_file(self.video_path(id));
         match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -892,6 +961,39 @@ impl Repository {
             )),
         }
     }
+}
+
+// Restore the original media if a subsequent write or state save fails.
+fn save_media(files: Vec<(PathBuf, &[u8])>, commit: impl FnOnce() -> Result<()>) -> Result<()> {
+    use std::io::Write;
+
+    let mut saved = Vec::new();
+    let result = (|| {
+        for (path, bytes) in files {
+            let previous = match fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
+            let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+            file.write_all(bytes)?;
+            file.persist(&path)?;
+            saved.push((path, previous));
+        }
+        commit()
+    })();
+    if result.is_err() {
+        for (path, previous) in saved.into_iter().rev() {
+            if let Some(bytes) = previous {
+                let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+                file.write_all(&bytes)?;
+                file.persist(path)?;
+            } else {
+                fs::remove_file(path)?;
+            }
+        }
+    }
+    result
 }
 
 pub fn normalize_photo(bytes: &[u8]) -> Result<Vec<u8>> {
@@ -936,26 +1038,8 @@ pub fn render_photo(bytes: &[u8], crop: Option<&Crop>) -> Result<Vec<u8>> {
         ));
     }
     let (width, height) = (image.width(), image.height());
-    let min = width.min(height) as f64;
     let (x, y, size) = if let Some(crop) = crop {
-        let side = crop.size * min;
-        let x = crop.x * f64::from(width);
-        let y = crop.y * f64::from(height);
-        if !x.is_finite()
-            || !y.is_finite()
-            || !side.is_finite()
-            || x < 0.0
-            || y < 0.0
-            || side < 1.0
-            || x + side > f64::from(width) + 0.00001
-            || y + side > f64::from(height) + 0.00001
-        {
-            bail!(Message::new(
-                "validation.crop",
-                "Choose a square crop within the image."
-            ));
-        }
-        (x.round() as u32, y.round() as u32, side.round() as u32)
+        crop.pixels(width, height)?
     } else {
         (
             (width - width.min(height)) / 2,
@@ -963,7 +1047,6 @@ pub fn render_photo(bytes: &[u8], crop: Option<&Crop>) -> Result<Vec<u8>> {
             width.min(height),
         )
     };
-    let size = size.min(width - x).min(height - y);
     let image = image
         .crop_imm(x, y, size, size)
         .resize_exact(640, 640, image::imageops::FilterType::Lanczos3)
@@ -981,6 +1064,7 @@ mod tests {
             id: id.into(),
             name: id.into(),
             generated_name: Some(false),
+            video: false,
             telegram_id: None,
             history_checked: true,
             crop: None,
@@ -1961,6 +2045,7 @@ mod appearance_tests {
             id: "a".into(),
             name: "a".into(),
             generated_name: None,
+            video: false,
             telegram_id: None,
             history_checked: false,
             crop: None,

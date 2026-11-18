@@ -72,6 +72,26 @@ export function PhotoDialog(props: {
             top: `${((-crop.y * height) / size) * 100}%`,
         };
     };
+    function startEditing() {
+        setLoaded(false);
+        setError(false);
+        setEditing(true);
+    }
+    function CropAction() {
+        return (
+            <button
+                type="button"
+                class="sortable-edit photo-preview-edit photo-icon-action shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
+                aria-label={t("cropPhoto", { name: photoDisplayName(props.photo) })}
+                disabled={saving()}
+                onClick={startEditing}
+            >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M6 3v12a3 3 0 0 0 3 3h12M3 6h12a3 3 0 0 1 3 3v12" />
+                </svg>
+            </button>
+        );
+    }
     function dismiss() {
         if (saving()) return;
         if (editing()) setEditing(false);
@@ -90,49 +110,63 @@ export function PhotoDialog(props: {
                 when={editing()}
                 fallback={
                     <>
-                        <div
-                            class="crop-stage photo-preview"
-                            aria-busy={!loaded() && !error() ? "true" : "false"}
+                        <Show
+                            when={!props.photo.video}
+                            fallback={
+                                <>
+                                    <div class="crop-stage photo-preview photo-preview-with-video">
+                                        <video
+                                            class="photo-preview-video"
+                                            src={props.api.photoVideoUrl(props.photo)}
+                                            poster={props.api.selectedPhotoUrl(props.photo)}
+                                            aria-label={photoDisplayName(props.photo)}
+                                            controls
+                                            muted
+                                            playsinline
+                                            onLoadStart={() => setError(false)}
+                                            onError={() => setError(true)}
+                                        />
+                                        <CropAction />
+                                    </div>
+                                    <Show when={error()}>
+                                        <p role="alert">{t("videoLoadError")}</p>
+                                    </Show>
+                                </>
+                            }
                         >
-                            <div class="photo-preview-crop">
-                                <img
-                                    src={props.api.originalPhotoUrl(props.photo.id)}
-                                    alt={photoDisplayName(props.photo)}
-                                    style={imageStyle()}
-                                    onLoad={(event) => {
-                                        setDimensions({
-                                            width: event.currentTarget.naturalWidth,
-                                            height: event.currentTarget.naturalHeight,
-                                        });
-                                        setLoaded(true);
-                                    }}
-                                    onError={() => setError(true)}
-                                />
+                            <div
+                                class="crop-stage photo-preview"
+                                aria-busy={!loaded() && !error() ? "true" : "false"}
+                            >
+                                <div class="photo-preview-crop">
+                                    <img
+                                        src={props.api.originalPhotoUrl(props.photo.id)}
+                                        alt={photoDisplayName(props.photo)}
+                                        style={imageStyle()}
+                                        onLoad={(event) => {
+                                            setDimensions({
+                                                width: event.currentTarget.naturalWidth,
+                                                height: event.currentTarget.naturalHeight,
+                                            });
+                                            setError(false);
+                                            setLoaded(true);
+                                        }}
+                                        onError={() => setError(true)}
+                                    />
+                                </div>
+                                <Show when={!loaded() && !error()}>
+                                    <span class="photo-dialog-skeleton" role="status">
+                                        <span class="visually-hidden">{t("cropLoading")}</span>
+                                    </span>
+                                </Show>
+                                <Show when={error()}>
+                                    <p role="alert">{t("cropLoadError")}</p>
+                                </Show>
+                                <Show when={loaded() && !error()}>
+                                    <CropAction />
+                                </Show>
                             </div>
-                            <Show when={!loaded() && !error()}>
-                                <span class="photo-dialog-skeleton" role="status">
-                                    <span class="visually-hidden">{t("cropLoading")}</span>
-                                </span>
-                            </Show>
-                            <Show when={error()}>
-                                <p role="alert">{t("cropLoadError")}</p>
-                            </Show>
-                            <Show when={loaded() && !error()}>
-                                <button
-                                    type="button"
-                                    class="sortable-edit photo-preview-edit photo-icon-action shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[Highlight]"
-                                    aria-label={t("cropPhoto", {
-                                        name: photoDisplayName(props.photo),
-                                    })}
-                                    disabled={saving()}
-                                    onClick={() => setEditing(true)}
-                                >
-                                    <svg aria-hidden="true" viewBox="0 0 24 24">
-                                        <path d="M6 3v12a3 3 0 0 0 3 3h12M3 6h12a3 3 0 0 1 3 3v12" />
-                                    </svg>
-                                </button>
-                            </Show>
-                        </div>
+                        </Show>
                     </>
                 }
             >

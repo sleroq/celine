@@ -53,7 +53,7 @@ impl AppearanceClient for Telegram {
 
 trait PhotoClient {
     async fn set_emoji_status(&mut self, id: Option<&str>) -> Result<(), TelegramError>;
-    async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError>;
+    async fn current_photo(&mut self) -> Result<Option<(HistoryPhoto, Vec<u8>)>, TelegramError>;
     async fn use_history_photo(&mut self, id: &str) -> Result<bool, TelegramError>;
     async fn set_photo(&mut self, path: &std::path::Path) -> Result<String, TelegramError>;
 }
@@ -62,7 +62,7 @@ impl PhotoClient for Telegram {
     async fn set_emoji_status(&mut self, id: Option<&str>) -> Result<(), TelegramError> {
         Telegram::set_emoji_status(self, id).await
     }
-    async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
+    async fn current_photo(&mut self) -> Result<Option<(HistoryPhoto, Vec<u8>)>, TelegramError> {
         Telegram::current_photo(self).await
     }
     async fn use_history_photo(&mut self, id: &str) -> Result<bool, TelegramError> {
@@ -270,11 +270,7 @@ impl App {
                         .is_some_and(|id| !photo_cache.contains(id))
                 }))
             .then(|| (photo_cache.clone(), Self::recovery_paths(&repository)));
-            let photos = photo_cache
-                .available()
-                .into_iter()
-                .map(|id| HistoryPhoto { id })
-                .collect();
+            let photos = photo_cache.available();
             (library, recovery, photos, status)
         };
         let (library, recovery) = if let Some((cache, paths)) = recovery_snapshot {
@@ -696,6 +692,10 @@ impl App {
         path: Option<&std::path::Path>,
         photo: &Photo,
     ) -> Option<Vec<String>> {
+        // A poster cannot identify the video it came from.
+        if photo.video {
+            return None;
+        }
         path.and_then(|path| std::fs::read(path).ok())
             .and_then(|bytes| cache.matches(&bytes).ok())
             .or_else(|| {
@@ -765,7 +765,13 @@ impl App {
                     photo.id.clone(),
                     PhotoRecovery {
                         duplicate_of,
-                        can_upload: matches.as_ref().is_some_and(|matches| matches.is_empty()),
+                        can_upload: if photo.video {
+                            paths.get(&photo.id).is_some_and(|path| {
+                                path.with_extension("mp4").is_file() && path.is_file()
+                            })
+                        } else {
+                            matches.as_ref().is_some_and(|matches| matches.is_empty())
+                        },
                     },
                 ))
             })
@@ -912,7 +918,7 @@ impl App {
                 self.photo_cache
                     .lock()
                     .await
-                    .set_history(photos.into_iter().map(|photo| photo.id).collect())
+                    .set_history_photos(photos)
                     .map_err(storage_error)?;
                 *sync = PhotoCacheSync::Images;
             }
@@ -1236,7 +1242,8 @@ impl App {
                     .map_err(storage_error)?
             };
             let Some(photo) = photo else { return Ok(()) };
-            if photo.telegram_id.is_none()
+            if !photo.video
+                && photo.telegram_id.is_none()
                 && self
                     .repository
                     .lock()
@@ -1306,15 +1313,15 @@ impl App {
         };
         let current = telegram.current_photo().await?;
         let mut matched = None;
-        if let Some((id, bytes)) = &current {
+        if let Some((current, bytes)) = &current {
             matched = photos
                 .iter()
-                .find(|photo| photo.telegram_id.as_ref() == Some(id))
+                .find(|photo| photo.telegram_id.as_ref() == Some(&current.id))
                 .map(|photo| photo.id.clone());
-            if matched.is_none() {
+            if matched.is_none() && !current.video {
                 let fingerprint = crate::photo_match::Fingerprint::decode(bytes)
                     .map_err(|error| storage_error(error.into()))?;
-                for photo in &photos {
+                for photo in photos.iter().filter(|photo| !photo.video) {
                     let Ok(path) = self.repository.lock().await.photo_path(&photo.id) else {
                         continue;
                     };
@@ -1333,12 +1340,12 @@ impl App {
             }
         }
         if matched.is_some()
-            && let Some((id, bytes)) = &current
+            && let Some((current, bytes)) = &current
         {
             self.photo_cache
                 .lock()
                 .await
-                .remember(id, bytes)
+                .remember(&current.id, bytes, current.video)
                 .map_err(storage_error)?;
         }
         let mut repository = self.repository.lock().await;
@@ -1356,7 +1363,7 @@ impl App {
                         .iter_mut()
                         .find(|photo| photo.id == *matched)
                         .unwrap();
-                    photo.telegram_id = current.map(|(id, _)| id);
+                    photo.telegram_id = current.map(|(current, _)| current.id);
                     photo.history_checked = true;
                     library.next_rotation_at =
                         Some(library.applied_settings.as_ref().unwrap().next_at(now()));
@@ -1409,18 +1416,27 @@ impl App {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(storage_error(error.into())),
         };
-        self.repository
-            .lock()
-            .await
-            .mark_photo_uploading(&photo.id)
-            .map_err(storage_error)?;
+        let upload_path = if photo.video {
+            let video_path = self.repository.lock().await.video_path(&photo.id);
+            if !video_path.is_file() {
+                return Ok(false);
+            }
+            video_path
+        } else {
+            self.repository
+                .lock()
+                .await
+                .mark_photo_uploading(&photo.id)
+                .map_err(storage_error)?;
+            path
+        };
         tracing::info!(method = "upload", "Photo change attempted");
-        let id = telegram.set_photo(&path).await?;
+        let id = telegram.set_photo(&upload_path).await?;
         tracing::info!(method = "upload", applied = true, "Photo change completed");
         self.photo_cache
             .lock()
             .await
-            .remember(&id, &jpeg)
+            .remember(&id, &jpeg, photo.video)
             .map_err(storage_error)?;
         self.repository
             .lock()
@@ -1852,14 +1868,27 @@ mod tests {
             assert_eq!(id, expected);
             result
         }
-        async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
+        async fn current_photo(
+            &mut self,
+        ) -> Result<Option<(HistoryPhoto, Vec<u8>)>, TelegramError> {
             match self.0.pop_front() {
-                Some(PhotoCall::Current(photo)) => Ok(photo.map(|(id, bytes)| (id.into(), bytes))),
+                Some(PhotoCall::Current(photo)) => Ok(photo.map(|(id, bytes)| {
+                    (
+                        HistoryPhoto {
+                            id: id.into(),
+                            video: false,
+                        },
+                        bytes,
+                    )
+                })),
                 Some(PhotoCall::PausedCurrent(entered, release)) => {
                     entered.notify_one();
                     release.notified().await;
                     Ok(Some((
-                        "1".into(),
+                        HistoryPhoto {
+                            id: "1".into(),
+                            video: false,
+                        },
                         include_bytes!("../web/public/logo.jpg").to_vec(),
                     )))
                 }
@@ -1928,7 +1957,9 @@ mod tests {
         async fn set_emoji_status(&mut self, _: Option<&str>) -> Result<(), TelegramError> {
             Err(self.fail())
         }
-        async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
+        async fn current_photo(
+            &mut self,
+        ) -> Result<Option<(HistoryPhoto, Vec<u8>)>, TelegramError> {
             panic!("unexpected reconciliation")
         }
         async fn use_history_photo(&mut self, _: &str) -> Result<bool, TelegramError> {
@@ -2910,7 +2941,9 @@ mod tests {
         async fn set_emoji_status(&mut self, _id: Option<&str>) -> Result<(), TelegramError> {
             panic!("unexpected status update")
         }
-        async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
+        async fn current_photo(
+            &mut self,
+        ) -> Result<Option<(HistoryPhoto, Vec<u8>)>, TelegramError> {
             Ok(None)
         }
         async fn use_history_photo(&mut self, _: &str) -> Result<bool, TelegramError> {
@@ -2931,6 +2964,7 @@ mod tests {
             id: id.into(),
             name: id.into(),
             generated_name: Some(false),
+            video: false,
             telegram_id: telegram_id.map(String::from),
             history_checked,
             crop: None,
@@ -2999,7 +3033,10 @@ mod tests {
             };
             Ok(ids
                 .into_iter()
-                .map(|id| HistoryPhoto { id: id.into() })
+                .map(|id| HistoryPhoto {
+                    id: id.into(),
+                    video: false,
+                })
                 .collect())
         }
 
@@ -3621,6 +3658,7 @@ mod tests {
                     id: "photo-a".into(),
                     name: "Portrait".into(),
                     generated_name: Some(false),
+                    video: false,
                     telegram_id: None,
                     history_checked: true,
                     crop: None,

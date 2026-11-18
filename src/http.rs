@@ -59,6 +59,7 @@ fn app_routes() -> Router<Arc<App>> {
         .route("/api/photos/{id}", get(photo).delete(remove))
         .route("/api/photos/{id}/reupload", post(reupload_photo))
         .route("/api/photos/{id}/original", get(original_photo))
+        .route("/api/photos/{id}/video", get(profile_video))
         .route("/api/photos/{id}/crop", put(save_crop))
         .route("/api/photos/{id}/emoji-status", put(save_photo_status))
         .route("/api/auth/qr", post(qr))
@@ -429,7 +430,11 @@ async fn emoji_media(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Respon
 async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> Response {
     let field = match multipart.next_field().await {
         Ok(Some(field)) => field,
-        _ => return bad(Message::new("upload.file_required", "Choose a JPEG or PNG file.").into()),
+        _ => {
+            return bad(
+                Message::new("upload.file_required", "Choose a JPEG, PNG, or MP4 file.").into(),
+            );
+        }
     };
     let name = field.file_name().unwrap_or("Profile photo").to_owned();
     let bytes = match field.bytes().await {
@@ -442,21 +447,37 @@ async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> Respon
             .into());
         }
     };
-    let original = bytes.to_vec();
-    let jpeg = match tokio::task::spawn_blocking(move || normalize_photo(&bytes)).await {
-        Ok(Ok(jpeg)) => jpeg,
+    match multipart.next_field().await {
+        Ok(None) => {}
+        _ => return bad(Message::new("upload.one_image", "Upload one file per request.").into()),
+    }
+    let video = crate::profile_video::is_mp4(&bytes);
+    let processed = tokio::task::spawn_blocking(move || {
+        if video {
+            crate::profile_video::prepare(&bytes, None).map(|(mp4, jpeg)| (bytes, jpeg, Some(mp4)))
+        } else {
+            normalize_photo(&bytes).map(|jpeg| (bytes, jpeg, None))
+        }
+    })
+    .await;
+    let (original, jpeg, video) = match processed {
+        Ok(Ok(media)) => media,
         Ok(Err(error)) => return bad(error),
         Err(_) => {
             return bad(
-                Message::new("upload.processing_failed", "Image processing failed.").into(),
+                Message::new("upload.processing_failed", "Media processing failed.").into(),
             );
         }
     };
-    match multipart.next_field().await {
-        Ok(None) => {}
-        _ => return bad(Message::new("upload.one_image", "Upload one image per request.").into()),
-    }
-    match app.add_local_photo(&name, &original, &jpeg).await {
+    let result = if let Some(video) = video {
+        app.repository
+            .lock()
+            .await
+            .add_video(&name, &original, &video, &jpeg)
+    } else {
+        app.add_local_photo(&name, &original, &jpeg).await
+    };
+    match result {
         Ok(()) => ok(),
         Err(_) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -540,6 +561,14 @@ struct PhotoVersion {
     crop: Option<String>,
 }
 
+impl PhotoVersion {
+    fn matches(&self, current: &Option<Crop>) -> bool {
+        self.crop.as_deref().is_some_and(|crop| {
+            serde_json::from_str::<Option<Crop>>(crop).is_ok_and(|crop| &crop == current)
+        })
+    }
+}
+
 async fn photo(
     State(app): State<Arc<App>>,
     Path(id): Path<String>,
@@ -552,9 +581,7 @@ async fn photo(
         .iter()
         .find(|photo| photo.id == id)
         .map(|photo| &photo.crop);
-    let cache = version.crop.as_deref().is_some_and(|crop| {
-        serde_json::from_str::<Option<Crop>>(crop).is_ok_and(|crop| current_crop == Some(&crop))
-    });
+    let cache = current_crop.is_some_and(|crop| version.matches(crop));
     let uncropped = current_crop == Some(&None);
     let path = match repository.photo_path(&id) {
         Ok(path) => path,
@@ -616,6 +643,30 @@ async fn photo_original_bytes(app: &App, id: &str) -> Result<Vec<u8>, Box<Respon
 }
 
 async fn original_photo(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+    let video = {
+        let repository = app.repository.lock().await;
+        repository
+            .data
+            .photos
+            .iter()
+            .any(|photo| photo.id == id && photo.video)
+            .then(|| repository.video_original(&id))
+    };
+    if let Some(video) = video {
+        let original = match video {
+            Ok(bytes) => bytes,
+            Err(_) => return local_photo_missing(),
+        };
+        return match tokio::task::spawn_blocking(move || {
+            crate::profile_video::original_frame(&original)
+        })
+        .await
+        {
+            Ok(Ok(frame)) => versioned_media(frame, "image/jpeg", false),
+            Ok(Err(error)) => bad(error),
+            Err(_) => media_processing_failed(),
+        };
+    }
     match photo_original_bytes(&app, &id).await {
         Ok(bytes) => {
             let mime = match image::guess_format(&bytes) {
@@ -626,6 +677,86 @@ async fn original_photo(State(app): State<Arc<App>>, Path(id): Path<String>) -> 
         }
         Err(response) => *response,
     }
+}
+
+async fn profile_video(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(version): Query<PhotoVersion>,
+    headers: HeaderMap,
+) -> Response {
+    let video = {
+        let repository = app.repository.lock().await;
+        repository
+            .data
+            .photos
+            .iter()
+            .find(|photo| photo.id == id && photo.video)
+            .and_then(|photo| {
+                std::fs::read(repository.video_path(&id))
+                    .ok()
+                    .map(|bytes| (bytes, version.matches(&photo.crop)))
+            })
+    };
+    if let Some((bytes, cache)) = video {
+        return video_response(bytes, &headers, cache);
+    }
+    api_error(
+        StatusCode::NOT_FOUND,
+        "Photo not found.",
+        MessageInfo::new("photo.not_found"),
+    )
+}
+
+// Safari requests a byte range before playing MP4, even for small local files.
+fn video_response(bytes: Vec<u8>, headers: &HeaderMap, cache: bool) -> Response {
+    let total = bytes.len();
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("bytes="))
+        .and_then(|value| value.split_once('-'));
+    let mut response = match range {
+        Some(("", suffix)) if let Ok(count) = suffix.parse::<usize>() => partial_video(
+            bytes,
+            total.saturating_sub(count),
+            total.saturating_sub(1),
+            cache,
+        ),
+        Some((first, last))
+            if let Ok(start) = first.parse::<usize>()
+                && let Some(end) = if last.is_empty() {
+                    Some(total.saturating_sub(1))
+                } else {
+                    last.parse::<usize>().ok()
+                } =>
+        {
+            partial_video(bytes, start, end.min(total.saturating_sub(1)), cache)
+        }
+        _ => versioned_media(bytes, "video/mp4", cache),
+    };
+    response
+        .headers_mut()
+        .insert(header::ACCEPT_RANGES, "bytes".parse().unwrap());
+    response
+}
+
+fn partial_video(bytes: Vec<u8>, first: usize, last: usize, cache: bool) -> Response {
+    let total = bytes.len();
+    if first >= total || first > last {
+        return (
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            [(header::CONTENT_RANGE, format!("bytes */{total}"))],
+        )
+            .into_response();
+    }
+    let mut response = versioned_media(bytes[first..=last].to_vec(), "video/mp4", cache);
+    *response.status_mut() = StatusCode::PARTIAL_CONTENT;
+    response.headers_mut().insert(
+        header::CONTENT_RANGE,
+        format!("bytes {first}-{last}/{total}").parse().unwrap(),
+    );
+    response
 }
 
 #[derive(Deserialize)]
@@ -674,7 +805,7 @@ async fn save_crop(
     Path(id): Path<String>,
     Json(request): Json<CropRequest>,
 ) -> Response {
-    {
+    let video = {
         let repository = app.repository.lock().await;
         let Some(photo) = repository.data.photos.iter().find(|photo| photo.id == id) else {
             return api_error(
@@ -686,6 +817,10 @@ async fn save_crop(
         if photo.crop == request.crop {
             return ok();
         }
+        photo.video.then(|| repository.video_original(&id))
+    };
+    if let Some(video) = video {
+        return save_video_crop(&app, &id, request.crop, video).await;
     }
     let original = match photo_original_bytes(&app, &id).await {
         Ok(bytes) => bytes,
@@ -706,6 +841,50 @@ async fn save_crop(
         Err(error) => bad(error),
     }
 }
+async fn save_video_crop(
+    app: &App,
+    id: &str,
+    crop: Option<Crop>,
+    original: anyhow::Result<Vec<u8>>,
+) -> Response {
+    let Ok(original) = original else {
+        return local_photo_missing();
+    };
+    let rendered = tokio::task::spawn_blocking(move || {
+        crate::profile_video::prepare(&original, crop.as_ref())
+            .map(|(video, poster)| (original, crop, video, poster))
+    })
+    .await;
+    let (original, crop, video, poster) = match rendered {
+        Ok(Ok(media)) => media,
+        Ok(Err(error)) => return bad(error),
+        Err(_) => return media_processing_failed(),
+    };
+    // Rotation also holds this lock while it uploads and links the current video.
+    let _connection = app.lock_telegram().await;
+    match app
+        .repository
+        .lock()
+        .await
+        .save_video_crop(id, crop, &original, &video, &poster)
+    {
+        Ok(()) => ok(),
+        Err(error) => bad(error),
+    }
+}
+
+fn local_photo_missing() -> Response {
+    api_error(
+        StatusCode::NOT_FOUND,
+        "Local photo is missing.",
+        MessageInfo::new("photo.local_missing"),
+    )
+}
+
+fn media_processing_failed() -> Response {
+    bad(Message::new("upload.processing_failed", "Media processing failed.").into())
+}
+
 async fn qr(State(app): State<Arc<App>>) -> Response {
     match app.login_qr().await {
         Ok(()) => ok(),

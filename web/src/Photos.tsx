@@ -147,7 +147,7 @@ export function Photos(
         >
             <input
                 type="file"
-                accept="image/jpeg,image/png"
+                accept="image/jpeg,image/png,video/mp4,.mp4"
                 multiple
                 disabled={props.busy}
                 class="visually-hidden"

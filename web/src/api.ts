@@ -31,6 +31,7 @@ export type Photo = {
     id: string;
     name: string;
     generated_name?: boolean | null;
+    video?: boolean;
     telegram_id: string | null;
     history_checked: boolean;
     crop: Crop | null;
@@ -148,12 +149,17 @@ export function accountApi(id: string) {
             id: choice,
         });
     }
+    function cropQuery(photo: Pick<Photo, "crop">) {
+        return `?crop=${encodeURIComponent(JSON.stringify(photo.crop ?? null))}`;
+    }
     return {
         request: createRequest(base),
         photoUrl,
         photoHistoryUrl,
+        photoVideoUrl: (photo: Pick<Photo, "id" | "crop">) =>
+            `${base}photos/${encodeURIComponent(photo.id)}/video${cropQuery(photo)}`,
         selectedPhotoUrl: (photo: Pick<Photo, "id" | "crop">) =>
-            `${photoUrl(photo.id)}?crop=${encodeURIComponent(JSON.stringify(photo.crop ?? null))}`,
+            `${photoUrl(photo.id)}${cropQuery(photo)}`,
         originalPhotoUrl: (photoId: string) =>
             globalThis.__previewMedia?.(id, `photos/${photoId}`) ?? `${photoUrl(photoId)}/original`,
         reuploadPhoto: (id: string) =>

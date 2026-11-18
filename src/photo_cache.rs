@@ -8,12 +8,19 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 
-use crate::photo_match::Fingerprint;
+use crate::{photo_match::Fingerprint, telegram::HistoryPhoto};
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum HistorySnapshot {
+    Photos(Vec<HistoryPhoto>),
+    Legacy(Vec<String>),
+}
 
 #[derive(Clone)]
 pub struct PhotoCache {
     directory: PathBuf,
-    history: Option<Vec<String>>,
+    history: Option<Vec<HistoryPhoto>>,
     cached: HashMap<String, Fingerprint>,
 }
 
@@ -23,12 +30,16 @@ impl PhotoCache {
         fs::create_dir_all(&directory)?;
         let history = match fs::read(directory.join("history.json")) {
             Ok(bytes) => {
-                let ids: Vec<String> =
-                    serde_json::from_slice(&bytes).context("reading photo history snapshot")?;
-                for id in &ids {
-                    validate_id(id)?;
+                let photos = match serde_json::from_slice(&bytes)
+                    .context("reading photo history snapshot")?
+                {
+                    HistorySnapshot::Photos(photos) => photos,
+                    HistorySnapshot::Legacy(ids) => still_photos(ids),
+                };
+                for photo in &photos {
+                    validate_id(&photo.id)?;
                 }
-                Some(ids)
+                Some(photos)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
@@ -60,14 +71,18 @@ impl PhotoCache {
     }
 
     pub fn photos(&self) -> Vec<String> {
-        self.history.clone().unwrap_or_default()
-    }
-
-    pub fn available(&self) -> Vec<String> {
         self.history
             .iter()
             .flatten()
-            .filter(|id| self.cached.contains_key(*id))
+            .map(|photo| photo.id.clone())
+            .collect()
+    }
+
+    pub fn available(&self) -> Vec<HistoryPhoto> {
+        self.history
+            .iter()
+            .flatten()
+            .filter(|photo| self.cached.contains_key(&photo.id))
             .cloned()
             .collect()
     }
@@ -75,25 +90,32 @@ impl PhotoCache {
     pub fn contains(&self, id: &str) -> bool {
         self.history
             .as_ref()
-            .is_some_and(|ids| ids.iter().any(|item| item == id))
+            .is_some_and(|photos| photos.iter().any(|photo| photo.id == id))
             && self.cached.contains_key(id)
     }
 
     pub fn complete(&self) -> bool {
-        self.history
-            .as_ref()
-            .is_some_and(|ids| ids.iter().all(|id| self.cached.contains_key(id)))
+        self.history.as_ref().is_some_and(|photos| {
+            photos
+                .iter()
+                .all(|photo| self.cached.contains_key(&photo.id))
+        })
     }
 
+    #[cfg(test)]
     pub fn set_history(&mut self, ids: Vec<String>) -> Result<()> {
-        for id in &ids {
-            validate_id(id)?;
+        self.set_history_photos(still_photos(ids))
+    }
+
+    pub fn set_history_photos(&mut self, photos: Vec<HistoryPhoto>) -> Result<()> {
+        for photo in &photos {
+            validate_id(&photo.id)?;
         }
         self.persist(
             &self.directory.join("history.json"),
-            &serde_json::to_vec(&ids)?,
+            &serde_json::to_vec(&photos)?,
         )?;
-        self.history = Some(ids);
+        self.history = Some(photos);
         Ok(())
     }
 
@@ -101,8 +123,8 @@ impl PhotoCache {
         self.history
             .iter()
             .flatten()
-            .filter(|id| !self.cached.contains_key(*id))
-            .cloned()
+            .filter(|photo| !self.cached.contains_key(&photo.id))
+            .map(|photo| photo.id.clone())
             .collect()
     }
 
@@ -110,7 +132,7 @@ impl PhotoCache {
         ensure!(
             self.history
                 .as_ref()
-                .is_some_and(|ids| ids.iter().any(|item| item == id)),
+                .is_some_and(|photos| photos.iter().any(|photo| photo.id == id)),
             "photo is not in the current history snapshot"
         );
         let fingerprint = Fingerprint::decode(bytes).context("decoding cached photo")?;
@@ -119,11 +141,17 @@ impl PhotoCache {
         Ok(())
     }
 
-    pub fn remember(&mut self, id: &str, bytes: &[u8]) -> Result<()> {
-        let mut ids = self.photos();
-        ids.retain(|item| item != id);
-        ids.insert(0, id.to_owned());
-        self.set_history(ids)?;
+    pub fn remember(&mut self, id: &str, bytes: &[u8], video: bool) -> Result<()> {
+        let mut photos = self.history.clone().unwrap_or_default();
+        photos.retain(|photo| photo.id != id);
+        photos.insert(
+            0,
+            HistoryPhoto {
+                id: id.to_owned(),
+                video,
+            },
+        );
+        self.set_history_photos(photos)?;
         self.store(id, bytes)
     }
 
@@ -164,11 +192,17 @@ impl PhotoCache {
         &'a self,
         candidate: &'a Fingerprint,
     ) -> impl Iterator<Item = &'a String> {
-        self.history.iter().flatten().filter(|id| {
-            self.cached
-                .get(*id)
-                .is_some_and(|photo| candidate.is_close(photo))
-        })
+        self.history
+            .iter()
+            .flatten()
+            .filter(|photo| {
+                !photo.video
+                    && self
+                        .cached
+                        .get(&photo.id)
+                        .is_some_and(|photo| candidate.is_close(photo))
+            })
+            .map(|photo| &photo.id)
     }
 
     fn image_path(&self, id: &str) -> PathBuf {
@@ -181,6 +215,12 @@ impl PhotoCache {
         temporary.persist(path)?;
         Ok(())
     }
+}
+
+fn still_photos(ids: Vec<String>) -> Vec<HistoryPhoto> {
+    ids.into_iter()
+        .map(|id| HistoryPhoto { id, video: false })
+        .collect()
 }
 
 fn validate_id(id: &str) -> Result<()> {
@@ -290,7 +330,7 @@ mod tests {
         for id in ["../escape", "01", "+1", "9223372036854775808"] {
             assert!(cache.store(id, &bytes).is_err());
             assert!(cache.set_history(vec![id.into()]).is_err());
-            assert!(cache.remember(id, &bytes).is_err());
+            assert!(cache.remember(id, &bytes, false).is_err());
             assert_eq!(cache.photos(), ["1", "-2"]);
             assert_eq!(
                 PhotoCache::open(account.path()).unwrap().photos(),

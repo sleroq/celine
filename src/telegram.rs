@@ -18,9 +18,10 @@ use serde::{Deserialize, Serialize};
 mod connection;
 use connection::{Connection, Login};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct HistoryPhoto {
     pub id: String,
+    pub video: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -389,7 +390,7 @@ pub struct Telegram {
     thumbnails: HashMap<i64, Thumbnail>,
     documents: HashMap<i64, tl::types::Document>,
     profile: Option<Profile>,
-    profile_photo: Option<DownloadFile>,
+    profile_photo: Option<(DownloadFile, bool)>,
     profile_refresh_due: bool,
     history: HashMap<i64, tl::types::Photo>,
 }
@@ -549,15 +550,21 @@ impl Telegram {
                     ),
                 }
             })?;
+        let is_video = path.extension().is_some_and(|extension| extension == "mp4");
+        let (image, video) = if is_video {
+            (None, Some(file.raw))
+        } else {
+            (Some(file.raw), None)
+        };
         let result = self
             .connection
             .client()
             .invoke(&tl::functions::photos::UploadProfilePhoto {
                 fallback: false,
                 bot: None,
-                file: Some(file.raw),
-                video: None,
-                video_start_ts: None,
+                file: image,
+                video,
+                video_start_ts: is_video.then_some(0.0),
                 video_emoji_markup: None,
             })
             .await
@@ -608,6 +615,10 @@ impl Telegram {
                     if !photos.contains_key(&photo.id) {
                         entries.push(HistoryPhoto {
                             id: photo.id.to_string(),
+                            video: photo
+                                .video_sizes
+                                .as_ref()
+                                .is_some_and(|sizes| !sizes.is_empty()),
                         });
                     }
                     photos.insert(photo.id, photo);
@@ -648,11 +659,13 @@ impl Telegram {
         unreachable!("both download attempts return or refresh")
     }
 
-    pub async fn current_photo(&mut self) -> Result<Option<(String, Vec<u8>)>, TelegramError> {
+    pub async fn current_photo(
+        &mut self,
+    ) -> Result<Option<(HistoryPhoto, Vec<u8>)>, TelegramError> {
         self.require_available()?;
         self.require_authorized()?;
         self.verify_identity().await?;
-        let Some(file) = self.profile_photo.clone() else {
+        let Some((file, video)) = self.profile_photo.clone() else {
             return Ok(None);
         };
         let tl::enums::InputFileLocation::InputPeerPhotoFileLocation(location) = &file.location
@@ -661,7 +674,7 @@ impl Telegram {
         };
         let id = location.photo_id.to_string();
         let bytes = self.download(&file).await?;
-        Ok(Some((id, bytes)))
+        Ok(Some((HistoryPhoto { id, video }, bytes)))
     }
 
     pub async fn use_history_photo(&mut self, id: &str) -> Result<bool, TelegramError> {
@@ -723,7 +736,7 @@ impl Telegram {
     pub async fn profile_photo(&mut self) -> Result<(Vec<u8>, &'static str), TelegramError> {
         self.require_available()?;
         self.require_authorized()?;
-        let photo = self.profile_photo.clone().ok_or_else(|| {
+        let (photo, _) = self.profile_photo.clone().ok_or_else(|| {
             TelegramError::message(
                 "telegram.profile_photo_missing",
                 "This Telegram account has no profile photo.",
@@ -1287,7 +1300,9 @@ impl Telegram {
             verified_at: Instant::now(),
         };
         self.profile_photo = user.photo.as_ref().and_then(|photo| match photo {
-            tl::enums::UserProfilePhoto::Photo(photo) => Some(DownloadFile::profile_photo(photo)),
+            tl::enums::UserProfilePhoto::Photo(photo) => {
+                Some((DownloadFile::profile_photo(photo), photo.has_video))
+            }
             tl::enums::UserProfilePhoto::Empty => None,
         });
         self.profile = Some(Profile {
