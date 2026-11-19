@@ -23,6 +23,7 @@ import { RequestError } from "./api";
 import { createAutosave } from "./autosave";
 import { SortableList } from "./SortableList";
 import { EmojiMedia } from "./EmojiMedia";
+import { AvatarVideo } from "./AvatarVideo";
 import { Button } from "./components/ui";
 import { t } from "./i18n";
 import { updateAppearanceSection } from "./appearance-editor";
@@ -41,6 +42,7 @@ export function AppearanceEditor(props: {
     disabled: boolean;
     profile?: Profile | null;
     avatarUrl?: string;
+    avatarVideoUrl?: string;
     catalog?: AppearanceCatalog;
 }) {
     // The keyed account workspace keeps the account API stable for this editor.
@@ -166,6 +168,7 @@ export function AppearanceEditor(props: {
                                             )}
                                             profile={props.profile}
                                             avatarUrl={props.avatarUrl}
+                                            avatarVideoUrl={props.avatarVideoUrl}
                                         />
                                     </Show>
                                     <div class="space-y-3">
@@ -402,9 +405,12 @@ function AppearancePreview(props: {
     palette?: import("./api").AppearanceColor;
     profile?: Profile | null;
     avatarUrl?: string;
+    avatarVideoUrl?: string;
 }) {
     const name = () => props.profile?.name || t("appearancePreviewName");
-    const url = () => props.avatarUrl || props.profile?.photo_url;
+    const url = () => props.avatarUrl ?? props.profile?.photo_url;
+    const videoUrl = () =>
+        props.avatarUrl !== undefined ? props.avatarVideoUrl : props.profile?.photo_video_url;
 
     const light = () => props.palette?.colors ?? [];
     const dark = () => (props.palette?.dark_colors.length ? props.palette.dark_colors : light());
@@ -458,6 +464,7 @@ function AppearancePreview(props: {
                             />
                         )}
                     </Show>
+                    <AvatarVideo url={videoUrl()} poster={url()} />
                 </div>
                 <strong class="appearance-preview-title" title={name()}>
                     {name()}

@@ -48,6 +48,7 @@ fn app_routes() -> Router<Arc<App>> {
         .route("/api/emojis/settings/{action}", post(emoji_schedule))
         .route("/api/emojis/settings", put(emoji_settings))
         .route("/api/profile/photo", get(profile_photo))
+        .route("/api/profile/video", get(current_profile_video))
         .route("/api/photos", post(upload))
         .route(
             "/api/photos/history",
@@ -383,11 +384,7 @@ async fn profile_photo(
         Err(error) => return telegram_error(&app, error).await,
     };
     let Some(telegram) = connection.as_mut() else {
-        return api_error(
-            StatusCode::NOT_FOUND,
-            "Profile photo unavailable.",
-            MessageInfo::new("photo.profile_unavailable"),
-        );
+        return profile_unavailable();
     };
     let cache = version_matches(telegram.profile_photo_url(), version.v.as_deref());
     match telegram.profile_photo().await {
@@ -395,6 +392,34 @@ async fn profile_photo(
         Err(error) => telegram_error(&app, error).await,
     }
 }
+async fn current_profile_video(
+    State(app): State<Arc<App>>,
+    Query(version): Query<MediaVersion>,
+    headers: HeaderMap,
+) -> Response {
+    let mut connection = match app.connection().await {
+        Ok(connection) => connection,
+        Err(error) => return telegram_error(&app, error).await,
+    };
+    let Some(telegram) = connection.as_mut() else {
+        return profile_unavailable();
+    };
+    let cache = version_matches(telegram.profile_video_url(), version.v.as_deref());
+    match telegram.profile_video().await {
+        Ok(Some(bytes)) => video_response(bytes, &headers, cache),
+        Ok(None) => profile_unavailable(),
+        Err(error) => telegram_error(&app, error).await,
+    }
+}
+
+fn profile_unavailable() -> Response {
+    api_error(
+        StatusCode::NOT_FOUND,
+        "Profile photo unavailable.",
+        MessageInfo::new("photo.profile_unavailable"),
+    )
+}
+
 async fn emoji_media(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Response {
     let mut connection = match app.connection().await {
         Ok(connection) => connection,

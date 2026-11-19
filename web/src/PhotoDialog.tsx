@@ -319,6 +319,9 @@ export function PhotoDialog(props: {
                         profile={props.profile}
                         api={props.api}
                         avatarUrl={props.api.selectedPhotoUrl(props.photo)}
+                        avatarVideoUrl={
+                            props.photo.video ? props.api.photoVideoUrl(props.photo) : undefined
+                        }
                         value={appearance.value()}
                         change={appearance.edit}
                         disabled={saving()}

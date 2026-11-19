@@ -2,6 +2,7 @@ import { emojiDisplayName } from "./display-names";
 import { createEffect, Show } from "solid-js";
 import type { Profile } from "./api";
 import { EmojiMedia } from "./EmojiMedia";
+import { AvatarVideo } from "./AvatarVideo";
 
 export function ProfileHeader(props: { profile?: Profile | null; name: string; now: number }) {
     const emoji = () => {
@@ -24,12 +25,15 @@ export function ProfileHeader(props: { profile?: Profile | null; name: string; n
                 }
             >
                 {(url) => (
-                    <ProfileImage
-                        class="avatar"
-                        url={url()}
-                        label=""
-                        revision={props.profile?.updated_at}
-                    />
+                    <span class="avatar avatar-media">
+                        <ProfileImage
+                            class="avatar"
+                            url={url()}
+                            label=""
+                            revision={props.profile?.updated_at}
+                        />
+                        <AvatarVideo url={props.profile?.photo_video_url} poster={url()} />
+                    </span>
                 )}
             </Show>
             <span class="profile-name" title={name()}>

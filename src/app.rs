@@ -2200,6 +2200,7 @@ mod tests {
                 name: "After partial update".into(),
                 premium: true,
                 photo_url: None,
+                photo_video_url: None,
                 emoji: None,
                 appearance: crate::library::Appearance::default(),
                 appearance_collectible_conflict: false,

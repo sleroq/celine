@@ -85,6 +85,7 @@ export type Profile = {
     name: string;
     premium: boolean;
     photo_url?: string | null;
+    photo_video_url?: string | null;
     emoji?: {
         id: string;
         label: string;

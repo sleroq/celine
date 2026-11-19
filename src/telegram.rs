@@ -119,6 +119,7 @@ pub struct Profile {
     pub name: String,
     pub premium: bool,
     pub photo_url: Option<String>,
+    pub photo_video_url: Option<String>,
     pub emoji: Option<ProfileEmoji>,
     pub appearance: crate::library::Appearance,
     pub appearance_collectible_conflict: bool,
@@ -367,6 +368,19 @@ impl DownloadFile {
         }
     }
 
+    fn photo(photo: &tl::types::Photo, kind: &str) -> Self {
+        Self {
+            location: tl::types::InputPhotoFileLocation {
+                id: photo.id,
+                access_hash: photo.access_hash,
+                file_reference: photo.file_reference.clone(),
+                thumb_size: kind.to_owned(),
+            }
+            .into(),
+            dc_id: photo.dc_id,
+        }
+    }
+
     fn profile_photo(photo: &tl::types::UserProfilePhoto) -> Self {
         Self {
             location: tl::types::InputPeerPhotoFileLocation {
@@ -391,6 +405,7 @@ pub struct Telegram {
     documents: HashMap<i64, tl::types::Document>,
     profile: Option<Profile>,
     profile_photo: Option<(DownloadFile, bool)>,
+    profile_video: Option<(i64, Vec<u8>)>,
     profile_refresh_due: bool,
     history: HashMap<i64, tl::types::Photo>,
 }
@@ -423,6 +438,7 @@ impl Telegram {
             documents: HashMap::new(),
             profile: None,
             profile_photo: None,
+            profile_video: None,
             profile_refresh_due: false,
             history: HashMap::new(),
         };
@@ -750,6 +766,49 @@ impl Telegram {
             )
         })?;
         Ok((bytes, content_type))
+    }
+
+    pub async fn profile_video(&mut self) -> Result<Option<Vec<u8>>, TelegramError> {
+        self.require_available()?;
+        self.require_authorized()?;
+        let Some((file, true)) = &self.profile_photo else {
+            return Ok(None);
+        };
+        let tl::enums::InputFileLocation::InputPeerPhotoFileLocation(location) = &file.location
+        else {
+            unreachable!()
+        };
+        let id = location.photo_id;
+        // Browsers may send several range requests for one avatar.
+        if let Some((cached_id, bytes)) = &self.profile_video
+            && *cached_id == id
+        {
+            return Ok(Some(bytes.clone()));
+        }
+        let tl::enums::users::UserFull::Full(user) = self
+            .connection
+            .client()
+            .invoke(&tl::functions::users::GetFullUser {
+                id: tl::enums::InputUser::UserSelf,
+            })
+            .await
+            .map_err(|error| self.handle_error(error))?;
+        let tl::enums::UserFull::Full(user) = user.full_user;
+        let Some(tl::enums::Photo::Photo(photo)) = user.profile_photo else {
+            return Ok(None);
+        };
+        if photo.id != id {
+            return Ok(None);
+        }
+        let Some(video) = profile_video_download(&photo) else {
+            return Ok(None);
+        };
+        let bytes = self.download(&video).await?;
+        if !crate::profile_video::is_mp4(&bytes) {
+            return Ok(None);
+        }
+        self.profile_video = Some((id, bytes.clone()));
+        Ok(Some(bytes))
     }
 
     pub async fn apply_appearance(
@@ -1164,6 +1223,10 @@ impl Telegram {
         self.profile.as_ref()?.photo_url.as_deref()
     }
 
+    pub fn profile_video_url(&self) -> Option<&str> {
+        self.profile.as_ref()?.photo_video_url.as_deref()
+    }
+
     pub async fn emoji_set_cover(
         &mut self,
         id: i64,
@@ -1309,6 +1372,12 @@ impl Telegram {
             name,
             premium: user.premium,
             photo_url: profile_photo_url(user.photo.as_ref()),
+            photo_video_url: match user.photo.as_ref() {
+                Some(tl::enums::UserProfilePhoto::Photo(photo)) if photo.has_video => {
+                    Some(format!("/api/profile/video?v={}", photo.photo_id))
+                }
+                _ => None,
+            },
             emoji: None,
             appearance_collectible_conflict: matches!(
                 user.emoji_status,
@@ -1317,6 +1386,9 @@ impl Telegram {
             appearance: current_appearance(user.profile_color.as_ref(), user.color.as_ref()),
             updated_at: unix_now(),
         });
+        if self.profile_video_url().is_none() {
+            self.profile_video = None;
+        }
         if let Some((id, expires_at)) = current_status(user.emoji_status.as_ref(), unix_now()) {
             let document = match self.documents.get(&id).cloned() {
                 Some(document) => Some(document),
@@ -1436,6 +1508,7 @@ impl Telegram {
             self.history.clear();
             self.profile = None;
             self.profile_photo = None;
+            self.profile_video = None;
         }
         error
     }
@@ -1511,6 +1584,19 @@ fn stale_photo_reference(error: &InvocationError) -> bool {
     matches!(error, InvocationError::Rpc(rpc) if rpc.name.starts_with("FILE_REFERENCE_") || rpc.name == "FILEREF_UPGRADE_NEEDED")
 }
 
+fn profile_video_download(photo: &tl::types::Photo) -> Option<DownloadFile> {
+    let size = photo
+        .video_sizes
+        .as_ref()?
+        .iter()
+        .filter_map(|size| match size {
+            tl::enums::VideoSize::Size(size) => Some(size),
+            _ => None,
+        })
+        .min_by_key(|size| size.size)?;
+    Some(DownloadFile::photo(photo, &size.r#type))
+}
+
 fn history_download(photo: &tl::types::Photo) -> Option<DownloadFile> {
     let kind = photo
         .sizes
@@ -1533,16 +1619,7 @@ fn history_download(photo: &tl::types::Photo) -> Option<DownloadFile> {
             }
         })?
         .0;
-    Some(DownloadFile {
-        location: tl::types::InputPhotoFileLocation {
-            id: photo.id,
-            access_hash: photo.access_hash,
-            file_reference: photo.file_reference.clone(),
-            thumb_size: kind.clone(),
-        }
-        .into(),
-        dc_id: photo.dc_id,
-    })
+    Some(DownloadFile::photo(photo, kind))
 }
 
 fn invalidated_key(error: &InvocationError, was_authorized: bool) -> bool {
@@ -2360,6 +2437,7 @@ mod tests {
             documents: HashMap::new(),
             profile: None,
             profile_photo: None,
+            profile_video: None,
             profile_refresh_due: false,
             history: HashMap::new(),
         };
@@ -2591,6 +2669,7 @@ mod tests {
             name: "Current Telegram name".into(),
             premium: true,
             photo_url: None,
+            photo_video_url: None,
             emoji: None,
             appearance_collectible_conflict: false,
             appearance: crate::library::Appearance::default(),

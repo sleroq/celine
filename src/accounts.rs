@@ -265,7 +265,7 @@ pub fn scope_media(value: &mut serde_json::Value, id: &str) {
             for (field, value) in values {
                 if matches!(
                     field.as_str(),
-                    "photo_url" | "media_url" | "cover_url" | "thumbnail_url"
+                    "photo_url" | "photo_video_url" | "media_url" | "cover_url" | "thumbnail_url"
                 ) {
                     if let Some(url) = value.as_str().and_then(|url| url.strip_prefix("/api/"))
                         && !url.starts_with("accounts/")
