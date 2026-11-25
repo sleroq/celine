@@ -8,7 +8,7 @@ rust-version = "1.99"
 [dependencies]
 anyhow = "1"
 base64 = "0.23"
-qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+qrcode = { version = "0.15", default-features = false, features = ["svg"] }
 axum = { version = "0.8", features = ["multipart"] }
 directories = "6"
 grammers-client = "=0.12.0"
