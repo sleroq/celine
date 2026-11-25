@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.4 AS bun
+FROM oven/bun:1.4.5 AS bun
 
 FROM rust:1.100.0-bookworm AS builder
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
